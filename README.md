@@ -71,7 +71,7 @@ Two input routes are supported transparently:
 ### Software
 
 - Python 3.11 or later
-- Google Cloud SDK (`gcloud` CLI) — [install here](https://cloud.google.com/sdk/docs/install)
+- Google Cloud SDK (`gcloud` CLI) [install here](https://cloud.google.com/sdk/docs/install)
 
 ### Accounts and Access
 
@@ -404,7 +404,7 @@ The `data/` folder (containing fetched XMLs, PDFs, and extracted JSONs) is not c
 
 
 ## Setting up ETH VPN (really easy) 
-1) First go to https://sslvpn.ethz.ch
+1) First go [here](https://sslvpn.ethz.ch)
 2) For students select student-net under Group. for staff select staff-net
 3) For students the username slot should be username@student-net.ethz.ch, for staff the username slot should be username@staff-net.ethz.ch
 4) Password should be the net password
