@@ -1,0 +1,390 @@
+# =============================================================================
+# W-DBTT PROJECT SCHEMA
+# Tungsten ductile-to-brittle transition temperature, microstructure,
+# and mechanical properties.
+# =============================================================================
+
+project: w_dbtt
+material_system: "Tungsten (W) and W-based alloys"
+record_id_prefix: "W"
+
+# -----------------------------------------------------------------------------
+# DOMAIN RULES
+# This block is injected verbatim into the Gemini extraction prompt.
+# It contains all W-specific knowledge. A different student project would
+# replace this block with their own domain rules.
+# -----------------------------------------------------------------------------
+domain_rules: |
+  COMPOSITION:
+  - composition_type must be exactly one of: pure, doped, alloy
+    - pure = W >= 99.9% with no intentional dopants
+    - doped = W with trace intentional additions (K, La, Y, Re < 1 wt%)
+    - alloy = significant alloying elements (Re >= 1 wt%, Ta, Hf, Mo, etc.)
+  - dopant_concentration_unit must be exactly one of: ppm, wt%, at%
+
+  CALCULATED DESCRIPTORS — CALCULATE THESE, they are never reported in papers:
+  - VEC: weighted average valence electrons = sum(c_i * VEC_i)
+    Atomic VEC values: W=6, Re=7, Mo=6, Ta=5, Nb=5, Hf=4, Ti=4, Zr=4, V=5, Cr=6, K=1
+    Pure W: VEC = 6.0 exactly. W-3wt%Re: convert to mole fraction first (VEC ~6.03).
+  - grain_boundary_area_to_volume_per_um = 1/grain_size_L_um + 1/grain_size_T_um + 1/grain_size_S_um
+    If only one direction known, use 1/d and note limitation in notes field.
+  - delta_H_mix_kJ_mol, delta_S_mix_J_mol_K, delta_atomic_size:
+    Pure W or trace K-doped: all = 0.0. Alloys: use Takeuchi-Inoue formulation.
+    Never leave these null if the composition is fully known.
+
+  GRAIN SIZE:
+  - grain_size_L_um = longitudinal / rolling direction (RD/LD)
+  - grain_size_T_um = transverse direction (TD)
+  - grain_size_S_um = short-transverse / normal direction (ND, thickness direction)
+  - grain_size_estimated_dimensions must be exactly one of:
+    none / partial / x_y_estimated / single_direction_only /
+    reported_as_D10_D50_D90_distribution_not_xyz
+  - Match paper coordinate system (x/y/z notation) to L/T/S from the paper's
+    description of rolling/forging geometry.
+
+  DISLOCATION DENSITY:
+  - pre_existing_dislocation_density_m2: units must be m^-2 (not cm^-2).
+    Typical range for W: 10^10 to 10^14 m^-2.
+    Conversion: 1 cm^-2 = 10^4 m^-2 (so 10^7 cm^-2 = 10^11 m^-2).
+
+  DBTT:
+  - All temperatures in Kelvin. Convert from Celsius: K = degC + 273.15.
+  - DBTT_definition: HOW the DBTT was determined from data (not the test type).
+    Examples: "temperature at 50% ductile fracture surface area from Charpy curve"
+              "T_half from fitted flexural strain sigmoid (Yin et al. criterion)"
+              "lowest test temperature showing solely ductile behavior (Bonnekoh criterion)"
+    NOT: "CIT" or "Charpy" — those belong in measurement_method.
+  - measurement_method: the test type — Charpy / SENT / SPT / tensile / 3PB.
+  - If DBTT reported as range: midpoint -> DBTT_K, half-range -> DBTT_uncertainty_K.
+    Also fill DBTT_lower_K and DBTT_upper_K from the reported bounds.
+
+  PROCESSING:
+  - processing_history format: [method]; [temperature_range]; [reduction_%]; [passes]; [condition]
+    Methods: cold_rolled / hot_rolled / warm_rolled / rotary_swaged / annealed /
+    recrystallized / hot_forged / spark_plasma_sintered / powder_injection_molded / sintered
+    Example: "hot_rolled; 1450-1650C; 20-25%/pass; 5_passes; annealed"
+  - logarithmic_strain: calculate as ln(1/(1-total_reduction)) if not directly reported.
+    If reported as passes x per-pass reduction: eps = n * ln(1/(1-r_per_pass))
+  - deformation_temperature_K: temperature during deformation, in Kelvin.
+
+  LOADING DIRECTION:
+  - loading_direction_relative_to_grain: describe relationship between loading /
+    crack propagation and grain elongation direction.
+    Examples: "along_L_direction" / "along_S_direction" / "L-T crack system"
+
+# -----------------------------------------------------------------------------
+# FIELDS
+# Each field becomes one entry in the dynamic Pydantic model AND one line
+# in the Gemini extraction prompt. Keep descriptions concise — they are
+# injected directly into the prompt.
+# -----------------------------------------------------------------------------
+fields:
+  # ── IDENTITY ────────────────────────────────────────────────────────────────
+  - name: record_id
+    type: str
+    description: "Leave null — assigned manually in Excel"
+
+  - name: material_name
+    type: str
+    description: "Material name, e.g. 'pure W', 'W-K', 'W-3wt%Re'"
+
+  - name: commercial_grade_name
+    type: str
+    description: "Commercial or proprietary grade name, e.g. 'Plansee WVM', 'Densimet 185'"
+
+  # ── COMPOSITION ─────────────────────────────────────────────────────────────
+  - name: composition_type
+    type: str
+    description: "Exactly one of: pure / doped / alloy (see domain rules)"
+
+  - name: base_material_purity_pct
+    type: float
+    unit: wt%
+    description: "W purity in wt%, e.g. 99.97"
+
+  - name: impurities
+    type: str
+    description: "Impurity elements listed, e.g. 'O, N, C, Fe' — free text"
+
+  - name: impurity_concentration
+    type: float
+    unit: ppm
+    description: "Total impurity level in ppm if reported as a single number"
+
+  - name: dopant_or_alloying_element
+    type: str
+    description: "Primary dopant or alloying element symbol, e.g. 'K', 'Re', 'La2O3'"
+
+  - name: dopant_concentration
+    type: float
+    description: "Numeric concentration of the primary dopant/alloy element (no units here)"
+
+  - name: dopant_concentration_unit
+    type: str
+    description: "Unit for dopant_concentration — exactly one of: ppm / wt% / at%"
+
+  - name: second_dopant_element
+    type: str
+    description: "Second dopant or alloying element symbol if present"
+
+  - name: second_dopant_concentration
+    type: float
+    description: "Concentration of the second element (numeric, no units)"
+
+  - name: second_dopant_concentration_unit
+    type: str
+    description: "Unit for second_dopant_concentration — exactly one of: ppm / wt% / at%"
+
+  # ── PROCESSING ──────────────────────────────────────────────────────────────
+  - name: processing_history
+    type: str
+    description: "Full processing route in standardised format (see domain rules)"
+
+  - name: deformation_process
+    type: str
+    description: "Primary deformation method, e.g. 'cold_rolling', 'rotary_swaging'"
+
+  - name: starting_material
+    type: str
+    description: "Form of the starting material, e.g. 'sintered ingot', 'arc-melted button'"
+
+  - name: deformation_temperature_K
+    type: float
+    unit: K
+    description: "Temperature during primary deformation step, in Kelvin"
+
+  - name: logarithmic_strain
+    type: float
+    description: "Total accumulated true (logarithmic) strain. Calculate from reduction if not stated."
+
+  - name: cumulative_true_strain
+    type: float
+    description: "Cumulative true strain if separately reported from logarithmic_strain"
+
+  - name: degree_of_cold_rolling
+    type: float
+    unit: "%"
+    description: "Total cold-rolling reduction in % if explicitly reported"
+
+  - name: recrystallization_temp_K
+    type: float
+    unit: K
+    description: "Recrystallization onset or annealing temperature in Kelvin"
+
+  # ── MICROSTRUCTURE ──────────────────────────────────────────────────────────
+  - name: grain_size_L_um
+    type: float
+    unit: um
+    description: "Grain size in the longitudinal / rolling direction (RD/LD) in micrometres"
+
+  - name: grain_size_T_um
+    type: float
+    unit: um
+    description: "Grain size in the transverse direction (TD) in micrometres"
+
+  - name: grain_size_S_um
+    type: float
+    unit: um
+    description: "Grain size in the short-transverse / normal direction (ND) in micrometres"
+
+  - name: grain_size_L_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_L_um"
+
+  - name: grain_size_T_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_T_um"
+
+  - name: grain_size_S_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_S_um"
+
+  - name: grain_boundary_area_to_volume_per_um
+    type: float
+    unit: "um^-1"
+    description: "CALCULATED: 1/L + 1/T + 1/S (see domain rules). Never null if grain sizes known."
+
+  - name: grain_size_estimated_dimensions
+    type: str
+    description: "Dimensionality of reported grain size — exactly one of: none / partial / x_y_estimated / single_direction_only / reported_as_D10_D50_D90_distribution_not_xyz"
+
+  - name: grain_aspect_ratio
+    type: float
+    description: "Grain aspect ratio (longest / shortest axis), if reported"
+
+  - name: grain_morphology_qualitative
+    type: str
+    description: "Qualitative grain shape description, e.g. 'pancake', 'equiaxed', 'elongated', 'fibrous'"
+
+  - name: pre_existing_dislocation_density_m2
+    type: float
+    unit: "m^-2"
+    description: "Pre-existing dislocation density in m^-2. Ensure correct unit conversion (see domain rules)."
+
+  - name: dislocation_density_method
+    type: str
+    description: "Method used to measure dislocation density, e.g. 'EBSD', 'TEM', 'XRD line broadening'"
+
+  - name: mobile_dislocation_fraction_pct
+    type: float
+    unit: "%"
+    description: "Fraction of dislocations considered mobile, in %"
+
+  # ── DBTT ────────────────────────────────────────────────────────────────────
+  - name: DBTT_K
+    type: float
+    unit: K
+    description: "Ductile-to-brittle transition temperature in Kelvin. If range reported, use midpoint."
+
+  - name: DBTT_uncertainty_K
+    type: float
+    unit: K
+    description: "DBTT uncertainty in Kelvin. If range reported, use half the range."
+
+  - name: DBTT_lower_K
+    type: float
+    unit: K
+    description: "Lower bound of the DBTT range in Kelvin"
+
+  - name: DBTT_upper_K
+    type: float
+    unit: K
+    description: "Upper bound of the DBTT range in Kelvin"
+
+  - name: DBTT_definition
+    type: str
+    description: "HOW the DBTT was determined from data (not the test type — see domain rules)"
+
+  # ── MECHANICAL PROPERTIES ────────────────────────────────────────────────────
+  - name: measurement_method
+    type: str
+    description: "Test type used, e.g. 'Charpy', 'SENT', 'SPT', 'tensile', '3PB'"
+
+  - name: elastic_modulus_GPa
+    type: float
+    unit: GPa
+    description: "Young's modulus in GPa"
+
+  - name: fracture_toughness_K_IC_MPa_m05
+    type: float
+    unit: "MPa m^0.5"
+    description: "Fracture toughness K_IC in MPa sqrt(m). Note in notes if geometry-limited (K_Q)"
+
+  - name: charpy_upper_shelf_energy_J
+    type: float
+    unit: J
+    description: "Charpy upper shelf energy in Joules"
+
+  - name: UTS_MPa
+    type: float
+    unit: MPa
+    description: "Ultimate tensile strength in MPa"
+
+  - name: yield_strength_MPa
+    type: float
+    unit: MPa
+    description: "0.2% offset yield strength in MPa"
+
+  - name: fracture_strength_MPa
+    type: float
+    unit: MPa
+    description: "Fracture strength (stress at failure) in MPa, if distinct from UTS"
+
+  - name: total_elongation_pct
+    type: float
+    unit: "%"
+    description: "Total elongation at fracture in %"
+
+  - name: mechanical_property_test_temp_K
+    type: float
+    unit: K
+    description: "Temperature at which mechanical properties were measured, in Kelvin"
+
+  - name: hardness_HV
+    type: float
+    unit: HV
+    description: "Vickers hardness value"
+
+  - name: hardness_HV_error_plus_or_minus
+    type: float
+    unit: HV
+    description: "±error on the hardness value"
+
+  - name: hardness_HV_test_load_kgf
+    type: float
+    unit: kgf
+    description: "Test load for Vickers hardness, in kgf (e.g. 0.1 for HV0.1)"
+
+  - name: hardness_HV_direction
+    type: str
+    description: "Direction of hardness indentation relative to grain, e.g. 'transversal_direction', 'normal_direction'"
+
+  - name: loading_direction_relative_to_grain
+    type: str
+    description: "Relationship between loading/crack propagation and grain elongation (see domain rules)"
+
+  - name: notch_fabrication_method
+    type: str
+    description: "How the notch was made, e.g. 'electrical discharge machining', 'razor blade'"
+
+  - name: loading_rate_or_strain_rate
+    type: str
+    description: "Loading or strain rate, including units, e.g. '1 MPa m^0.5 s^-1', '10^-3 s^-1'"
+
+  # ── SPECIMEN ─────────────────────────────────────────────────────────────────
+  - name: specimen_form
+    type: str
+    description: "Form of the specimen, e.g. 'plate', 'rod', 'sheet', 'disc'"
+
+  - name: specimen_thickness_mm
+    type: float
+    unit: mm
+    description: "Specimen thickness in mm"
+
+  - name: specimen_diameter_mm
+    type: float
+    unit: mm
+    description: "Specimen diameter in mm (for round bar or disc specimens)"
+
+  # ── THERMODYNAMIC DESCRIPTORS ────────────────────────────────────────────────
+  - name: VEC
+    type: float
+    description: "CALCULATED: Valence electron concentration (see domain rules). Never null if composition known."
+
+  - name: delta_H_mix_kJ_mol
+    type: float
+    unit: "kJ/mol"
+    description: "CALCULATED: Enthalpy of mixing (Takeuchi-Inoue). 0.0 for pure W or trace-doped W."
+
+  - name: delta_S_mix_J_mol_K
+    type: float
+    unit: "J/(mol K)"
+    description: "CALCULATED: Entropy of mixing. 0.0 for pure W or trace-doped W."
+
+  - name: delta_atomic_size
+    type: float
+    description: "CALCULATED: Atomic size mismatch parameter. 0.0 for pure W or trace-doped W."
+
+  # ── PROVENANCE ───────────────────────────────────────────────────────────────
+  - name: source_DOI
+    type: str
+    description: "DOI of the paper being extracted — always fill this"
+
+  - name: source_figure_or_table
+    type: str
+    description: "Specific figure or table each value was extracted from, e.g. 'Table 2, Fig.3a'"
+
+  - name: data_from_reference
+    type: list[str]
+    description: "Reference numbers that are the SOURCE of data points in this record (not background citations). Only fill if authors explicitly say data comes from another work. Example: [\"[5]\", \"[8]\"]"
+
+  - name: reference_titles
+    type: list[str]
+    description: "Author-year strings matching entries in data_from_reference, in the same order. Example: [\"Smith 2019\", \"Jones et al. 2021\"]"
+
+  - name: notes
+    type: str
+    description: "All uncertainties, methodology caveats, and derived values. Use tags: [methodology] [dbtt_methodology] [grain_size_methodology] [graph_read] [derived] [scope_caveat] [finding]"
