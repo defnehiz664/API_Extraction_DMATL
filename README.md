@@ -1,4 +1,4 @@
-#Extraction Pipeline
+## Extraction Pipeline
 
 Automated pipeline for extracting structured materials science data from scientific papers using Google Gemini. Reads Elsevier full-text XML or PDFs, sends content to Gemini, and outputs structured JSON matching a dataset schema from a schema folder (.yaml) for manual review before entry into Excel.
 
@@ -361,7 +361,7 @@ Save as: data/papers/10-1103_PhysRevMaterials-5-013602.pdf
 
 ---
 
-## Troubleshooting
+## Troubleshooting (Common bugs) 
 
 ### `GOOGLE_CLOUD_PROJECT not set`
 Your `.env` file is missing or not being found. Make sure it is in the project root (same folder as `README.md`) and contains `GOOGLE_CLOUD_PROJECT=matmodel-literaturemining-govc`.
