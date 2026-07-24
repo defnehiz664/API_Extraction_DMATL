@@ -1,8 +1,8 @@
-# Tungsten DBTT Extraction Pipeline
+## Extraction Pipeline
 
-Automated pipeline for extracting structured materials science data from scientific papers using Google Gemini. Reads Elsevier full-text XML or PDFs, sends content to Gemini, and outputs structured JSON matching a fixed dataset schema for manual review before entry into Excel.
+Automated pipeline for extracting structured materials science data from scientific papers using Google Gemini. Reads Elsevier full-text XML or PDFs, sends content to Gemini, and outputs structured JSON matching a dataset schema from a schema folder (.yaml) for manual review before entry into Excel.
 
-**Research context:** ETH Zurich Materials Modeling Laboratory. The extracted data populates a dataset of tungsten ductile-to-brittle transition temperature (DBTT) measurements, microstructural parameters, and mechanical properties for use in machine learning model training.
+**Research context:** ETH Zurich Materials Modeling Laboratory. The extracted data populates a dataset of ductile-to-brittle transition temperature (DBTT) measurements, microstructural parameters, and mechanical properties for future use in machine learning model training.
 
 ---
 
@@ -71,7 +71,7 @@ Two input routes are supported transparently:
 ### Software
 
 - Python 3.11 or later
-- Google Cloud SDK (`gcloud` CLI) — [install here](https://cloud.google.com/sdk/docs/install)
+- Google Cloud SDK (`gcloud` CLI) [install here](https://cloud.google.com/sdk/docs/install)
 
 ### Accounts and Access
 
@@ -82,7 +82,6 @@ Two input routes are supported transparently:
 | Elsevier API key | In `.env` as `ELSEVIER_API_KEY` |
 | ETH VPN | Required for Elsevier full-text and some PDF downloads |
 
----
 
 ## Setup
 
@@ -101,7 +100,7 @@ pip install -r requirements.txt
 
 ### 3. Create your `.env` file
 
-Copy the template below and save it as `.env` in the project root. **Never commit this file to git.**
+Copy the template below and save it as `.env` in the project root. **Never commit this file to git. Always kept in .gitignore**
 
 ```env
 ELSEVIER_API_KEY=your_elsevier_api_key_here
@@ -110,11 +109,11 @@ GOOGLE_CLOUD_LOCATION=europe-west4
 GOOGLE_GENAI_USE_ENTERPRISE=True
 ```
 
-The Elsevier API key is shared per ETH subscription — ask the lab admin for it.
+The Elsevier API key is shared per ETH subscription, you need to ask the lab admin for it.
 
 ### 4. Authenticate with Google Cloud
 
-Run this **once per machine**. A browser window will open.
+Run this once per machine and a browser window will open.
 
 ```bash
 gcloud auth application-default login
@@ -123,7 +122,7 @@ gcloud auth application-default login
 gcloud auth application-default set-quota-project matmodel-literaturemining-govc
 ```
 
-After this, every script call uses your credentials automatically. No API key is needed for Gemini — access is through the institutional Vertex AI project.
+After this, every script call uses your credentials automatically. No API key is needed for Gemini because access is through the institutional Vertex AI project.
 
 ---
 
@@ -131,7 +130,7 @@ After this, every script call uses your credentials automatically. No API key is
 
 ### Normal run (recommended)
 
-Add DOIs to `scripts/fetch_papers.py`, connect to ETH VPN, then run both steps:
+Add DOIs to `scripts/fetch_papers.py`, connect to ETH VPN if not on campus, then run both steps:
 
 ```bash
 # Step 1: Fetch papers
@@ -141,12 +140,12 @@ python scripts/fetch_papers.py
 python scripts/extract_data.py --batch
 ```
 
-`--batch` automatically skips papers whose output JSON already exists. You can safely run it repeatedly — it only processes new papers.
+`--batch` automatically skips papers whose output JSON already exists. You can safely run it repeatedly and it only processes new papers.
 
-### Processing a single paper
+### Processing a single paper (example doi below)
 
 ```bash
-python scripts/extract_data.py 10.1016/j.jmst.2026.01.050
+python scripts/extract_data.py 10.1016/j.jmst.2026.01.050 
 ```
 
 ### Output location
@@ -232,7 +231,7 @@ Old test script, kept for reference. Superseded by `fetch_papers.py`.
 
 ---
 
-## Dataset Schema
+## Dataset Schema FOR DBTT PROJECT
 
 The extraction schema has 59 fields. All are optional — Gemini returns `null` for anything not reported in the paper.
 
@@ -280,31 +279,29 @@ The extraction schema has 59 fields. All are optional — Gemini returns `null` 
 | `source_figure_or_table` | string | e.g. `Table 2, Fig. 3` |
 | `notes` | string | caveats, uncertainties, methodology notes |
 
-Full field list is defined in the `MaterialRecord` Pydantic class in `scripts/extract_data.py`.
 
 ---
-
+### Schema is easily adjustable for differrent data mining needs by simply creating a .yaml file in the schema folder with the needed features. 
 ## File Structure
 
 ```
 API_Extraction_D-MATL/
 ├── scripts/
-│   ├── fetch_papers.py        ← Add DOIs here; fetches XML/PDF
-│   ├── extract_data.py        ← Runs extraction; use --batch for automation
-│   └── ElSevier_test.py       ← Old test file, kept for reference
+│   ├── fetch_papers.py        # Add DOIs here; fetches XML/PDF
+│   ├── extract_data.py        # Runs extraction; use --batch for automation
 │
 ├── data/
 │   ├── papers/
-│   │   ├── fetch_log.json                    ← Auto-updated by fetch_papers.py
-│   │   ├── manual_papers.json                ← Add DOIs for manually placed PDFs
-│   │   ├── {doi}.xml                         ← Elsevier full-text
-│   │   ├── {doi}_mmc1.docx                   ← Supplementary material
-│   │   └── {doi}.pdf                         ← Non-Elsevier PDFs
+│   │   ├── fetch_log.json                    # Auto-updated by fetch_papers.py
+│   │   ├── manual_papers.json                # Add DOIs for manually placed PDFs
+│   │   ├── {doi}.xml                         # Elsevier full-text
+│   │   ├── {doi}_mmc1.docx                   # Supplementary material
+│   │   └── {doi}.pdf                         # Non-Elsevier PDFs
 │   │
 │   ├── figures/
-│   │   └── {doi}/                            ← All figures saved here after extraction
-│   │       ├── gr1.jpg                       ← Raw figures (XML) or page_N.png (PDF)
-│   │       ├── microstructure/               ← Copies sorted by Gemini classification
+│   │   └── {doi}/                            # All figures saved here after extraction
+│   │       ├── gr1.jpg                       # Raw figures (XML) or page_N.png (PDF)
+│   │       ├── microstructure/               # Copies sorted by Gemini classification
 │   │       ├── DBTT_curve/
 │   │       ├── hardness/
 │   │       ├── EBSD/
@@ -313,14 +310,13 @@ API_Extraction_D-MATL/
 │   │       └── other/
 │   │
 │   └── outputs/
-│       └── {doi}_extraction.json             ← Gemini output (records + figure classifications)
+│       └── {doi}_extraction.json             # Gemini output (records + figure classifications)
 │
-├── .env                       ← API keys (never commit to git)
+├── .env                       # API keys (never commit to git)
 ├── .gitignore
 ├── requirements.txt
-├── CLAUDE.md                  ← Instructions for Claude AI assistant
-├── FIXES.md                   ← Changelog of fixes made to the pipeline
-└── README.md                  ← This file
+├── FIXES.md                   # Changelog of fixes made to the pipeline
+└── README.md                  # This file
 ```
 
 **File naming convention:** DOIs are sanitised for use as filenames by replacing `/` with `_` and `.` with `-`.
@@ -365,7 +361,7 @@ Save as: data/papers/10-1103_PhysRevMaterials-5-013602.pdf
 
 ---
 
-## Troubleshooting
+## Troubleshooting (Common bugs) 
 
 ### `GOOGLE_CLOUD_PROJECT not set`
 Your `.env` file is missing or not being found. Make sure it is in the project root (same folder as `README.md`) and contains `GOOGLE_CLOUD_PROJECT=matmodel-literaturemining-govc`.
@@ -394,7 +390,7 @@ Run `pip install -r requirements.txt`. This installs `PyMuPDF` (imported as `fit
 
 ## Sharing with Other Users
 
-The pipeline is designed to be portable. All paths derive from the script location — no hardcoded machine-specific paths.
+The pipeline is designed to be portable. All paths derive from the script location. No hardcoded machine-specific paths.
 
 Each new user needs to:
 
@@ -405,3 +401,13 @@ Each new user needs to:
 5. **Connect to ETH VPN** before fetching Elsevier papers
 
 The `data/` folder (containing fetched XMLs, PDFs, and extracted JSONs) is not committed to git and each user builds it locally by running the pipeline.
+
+
+## Setting up ETH VPN (really easy) 
+1) First go [here](https://sslvpn.ethz.ch)
+2) For students select student-net under Group. for staff select staff-net
+3) For students the username slot should be username@student-net.ethz.ch, for staff the username slot should be username@staff-net.ethz.ch
+4) Password should be the net password
+5) 2nd password is the microsoft authenticator OTP
+6) This will allow you to download the cisco installer
+7) Once you run the installer and cisco is set up, follow the same username and passwor dinstructions in app
