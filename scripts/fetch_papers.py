@@ -59,8 +59,8 @@ ELSEVIER_DOI_PREFIX = "10.1016/"
 # Add all the DOIs from your source_DOI column here.
 
 DOIS = [
-    #"10.1016/j.jmst.2026.01.050",
-    #"10.4236/ojapps.2013.31003",
+    "10.1016/j.jmst.2026.01.050",
+    "10.4236/ojapps.2013.31003",
     "10.1016/j.jnucmat.2020.152664",
 ]
 

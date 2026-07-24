@@ -7,8 +7,11 @@ Supports two input formats:
   - Elsevier XML  → body text + individual figure downloads via Elsevier API
   - PDF           → each page rendered as an image (for non-Elsevier papers)
 
-After extraction, runs a second Gemini call to classify every figure by type
-and organises them into subfolders under data/figures/{doi}/.
+Before extraction, runs a second Gemini call to classify every figure by
+type. Only figures matching SAVED_FIGURE_TYPES (currently: EBSD) are
+saved to disk — all figures are still sent to the main extraction call
+regardless, so DBTT curves/hardness plots/etc. are still read for data,
+they're just not kept as image files afterward.
 
 SETUP
 -----
@@ -41,20 +44,13 @@ USAGE
 OUTPUT
 ------
     data/outputs/{doi}_extraction.json   — structured extraction + figure classifications
-    data/figures/{doi}/                  — all figures saved as image files
-        microstructure/                  — organised by type
-        DBTT_curve/
-        hardness/
-        EBSD/
-        fracture_surface/
-        map/
-        other/
+    data/figures/{doi}/                  — only figures classified as one of
+                                            SAVED_FIGURE_TYPES (EBSD by default)
 """
 
 import os
 import sys
 import json
-import shutil
 import base64
 import argparse
 import requests
@@ -81,7 +77,9 @@ if not GOOGLE_CLOUD_PROJECT:
         "Then run: gcloud auth application-default login"
     )
 
-MODEL        = "gemini-2.5-flash"
+MODEL        = "gemini-2.5-flash" 
+
+
 PROJECT_ROOT = Path(__file__).parent.parent
 PAPERS_DIR   = PROJECT_ROOT / "data" / "papers"
 OUTPUT_DIR   = PROJECT_ROOT / "data" / "outputs"
@@ -343,17 +341,34 @@ def find_supplementary_docx(doi: str) -> list[Path]:
 
 # ── FIGURE SAVING ─────────────────────────────────────────────────────────────
 
-def save_figures(doi_slug: str, content_parts: list[tuple[str, bytes, str]]) -> Path:
-    """Save all figures/pages to data/figures/{doi_slug}/."""
+SAVED_FIGURE_TYPES = {"EBSD"}
+
+
+def save_selected_figures(
+    doi_slug: str,
+    content_parts: list[tuple[str, bytes, str]],
+    classifications: list[dict],
+) -> Path:
+    """
+    Save only figures whose classified type is in SAVED_FIGURE_TYPES to
+    data/figures/{doi_slug}/, named {doi_slug}_{label}.{ext}. Figures are
+    still sent to Gemini for the main extraction call regardless of
+    whether they're saved here — this only controls what's kept on disk.
+    """
     figures_dir = FIGURES_DIR / doi_slug
-    figures_dir.mkdir(parents=True, exist_ok=True)
+    type_by_label = {c.get("figure_id", ""): c.get("figure_type", "") for c in classifications}
 
+    saved = 0
     for label, img_bytes, mime in content_parts:
+        if type_by_label.get(label) not in SAVED_FIGURE_TYPES:
+            continue
+        figures_dir.mkdir(parents=True, exist_ok=True)
         ext      = "png" if "png" in mime else "jpg"
-        out_path = figures_dir / f"{label}.{ext}"
+        out_path = figures_dir / f"{doi_slug}_{label}.{ext}"
         out_path.write_bytes(img_bytes)
+        saved += 1
 
-    print(f"  Saved {len(content_parts)} figures to {figures_dir}")
+    print(f"  Saved {saved}/{len(content_parts)} figures to {figures_dir} (types kept: {sorted(SAVED_FIGURE_TYPES)})")
     return figures_dir
 
 
@@ -383,6 +398,7 @@ def classify_figures(
         config=types.GenerateContentConfig(
             temperature=0.0,
             max_output_tokens=4096,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
             response_mime_type="application/json",
             response_schema=list[FigureInfo],
         ),
@@ -391,47 +407,8 @@ def classify_figures(
     try:
         return json.loads(response.text)
     except json.JSONDecodeError:
-        print("  Classification parse failed — skipping organisation")
+        print("  Classification parse failed — no figures will be saved (can't determine type)")
         return []
-
-
-def organise_figures_by_type(
-    figures_dir: Path,
-    classifications: list[dict],
-    content_parts: list[tuple[str, bytes, str]],
-):
-    """
-    Copy each saved figure into a type-specific subfolder based on classification.
-    Original files remain in the root of figures_dir for reference.
-    """
-    # Build label → extension map from what we saved
-    label_to_file: dict[str, Path] = {}
-    for label, _, mime in content_parts:
-        ext  = "png" if "png" in mime else "jpg"
-        path = figures_dir / f"{label}.{ext}"
-        if path.exists():
-            label_to_file[label] = path
-
-    counts: dict[str, int] = {}
-    for item in classifications:
-        label = item.get("figure_id", "")
-        ftype = item.get("figure_type", "other")
-
-        if ftype not in FIGURE_TYPES:
-            ftype = "other"
-
-        src = label_to_file.get(label)
-        if not src:
-            continue
-
-        dest_dir = figures_dir / ftype
-        dest_dir.mkdir(exist_ok=True)
-        shutil.copy2(src, dest_dir / src.name)
-        counts[ftype] = counts.get(ftype, 0) + 1
-
-    if counts:
-        summary = ", ".join(f"{v} {k}" for k, v in sorted(counts.items()))
-        print(f"  Organised: {summary}")
 
 
 # ── BATCH MODE ────────────────────────────────────────────────────────────────
@@ -507,11 +484,7 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         print(f"For others:   save PDF as data/papers/{doi_slug}.pdf")
         sys.exit(1)
 
-    # ── Step 2: Save figures to disk ──────────────────────────────────────────
-    print(f"\nSaving figures...")
-    figures_dir = save_figures(doi_slug, content_parts)
-
-    # ── Step 3: Supplementary docx ────────────────────────────────────────────
+    # ── Step 2: Supplementary docx ─────────────────────────────────────────────
     supp_text  = ""
     supp_files = find_supplementary_docx(doi)
     if supp_files:
@@ -524,20 +497,19 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     else:
         print("\nNo supplementary .docx found")
 
-    # ── Step 4: Gemini client ─────────────────────────────────────────────────
+    # ── Step 3: Gemini client ─────────────────────────────────────────────────
     client = genai.Client(
         vertexai=True,
         project=GOOGLE_CLOUD_PROJECT,
         location=GOOGLE_CLOUD_LOCATION,
     )
 
-    # ── Step 5: Classify figures (separate lightweight call) ──────────────────
+    # ── Step 4: Classify figures (separate lightweight call) ──────────────────
     print(f"\nClassifying figures...")
     classifications = classify_figures(content_parts, client)
 
-    # Organise into subfolders
-    if classifications:
-        organise_figures_by_type(figures_dir, classifications, content_parts)
+    # ── Step 5: Save only figures matching SAVED_FIGURE_TYPES ─────────────────
+    figures_dir = save_selected_figures(doi_slug, content_parts, classifications)
 
     # ── Step 6: Extract structured data ───────────────────────────────────────
     n_parts = len(content_parts)
@@ -554,12 +526,14 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         contents.append(f"\n[{label}:]")
         contents.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
 
+    max_output_tokens = 65536
     response = client.models.generate_content(
         model=MODEL,
         contents=contents,
         config=types.GenerateContentConfig(
             temperature=0.0,
-            max_output_tokens=65536,
+            max_output_tokens=max_output_tokens,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
             response_mime_type="application/json",
             response_schema=list[schema_model],
         ),
@@ -568,13 +542,23 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     raw = response.text
     print(f"  Response: {len(raw):,} characters")
 
+    finish_reason = None
+    if response.candidates:
+        finish_reason = response.candidates[0].finish_reason
+        usage = response.usage_metadata
+        print(f"  finish_reason: {finish_reason}  "
+              f"(output_tokens={getattr(usage, 'candidates_token_count', '?')}/{max_output_tokens})")
+
     # ── Step 7: Parse and save ────────────────────────────────────────────────
     try:
         data = json.loads(raw)
         print(f"  Parsed: {len(data)} material records")
     except json.JSONDecodeError as e:
         print(f"  JSON parse failed: {e}")
-        data = {"error": "parse_failed", "raw": raw}
+        if str(finish_reason) == "MAX_TOKENS" or "MAX_TOKENS" in str(finish_reason):
+            print(f"  --> Response was TRUNCATED by max_output_tokens={max_output_tokens}. "
+                  f"Raise max_output_tokens or split this paper's extraction into fewer records per call.")
+        data = {"error": "parse_failed", "finish_reason": str(finish_reason), "raw": raw}
 
     output = {
         "model":              MODEL,

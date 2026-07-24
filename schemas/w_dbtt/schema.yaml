@@ -22,15 +22,11 @@ domain_rules: |
     - alloy = significant alloying elements (Re >= 1 wt%, Ta, Hf, Mo, etc.)
   - dopant_concentration_unit must be exactly one of: ppm, wt%, at%
 
-  CALCULATED DESCRIPTORS — CALCULATE THESE, they are never reported in papers:
-  - VEC: weighted average valence electrons = sum(c_i * VEC_i)
-    Atomic VEC values: W=6, Re=7, Mo=6, Ta=5, Nb=5, Hf=4, Ti=4, Zr=4, V=5, Cr=6, K=1
-    Pure W: VEC = 6.0 exactly. W-3wt%Re: convert to mole fraction first (VEC ~6.03).
-  - grain_boundary_area_to_volume_per_um = 1/grain_size_L_um + 1/grain_size_T_um + 1/grain_size_S_um
-    If only one direction known, use 1/d and note limitation in notes field.
-  - delta_H_mix_kJ_mol, delta_S_mix_J_mol_K, delta_atomic_size:
-    Pure W or trace K-doped: all = 0.0. Alloys: use Takeuchi-Inoue formulation.
-    Never leave these null if the composition is fully known.
+  CALCULATED DESCRIPTORS — DO NOT CALCULATE THESE, leave them null:
+  - VEC, delta_H_mix_kJ_mol, delta_S_mix_J_mol_K, delta_atomic_size:
+    Leave ALL of these as null. They will be computed correctly by the
+    database pipeline from the composition fields you extracted.
+    Do not attempt to calculate them — the pipeline handles this.
 
   GRAIN SIZE:
   - grain_size_L_um = longitudinal / rolling direction (RD/LD)
@@ -71,6 +67,14 @@ domain_rules: |
   - loading_direction_relative_to_grain: describe relationship between loading /
     crack propagation and grain elongation direction.
     Examples: "along_L_direction" / "along_S_direction" / "L-T crack system"
+  
+  COMPOSITION STRING:
+  - composition_string: compute this from the composition you extracted.
+    Convert all concentrations to atomic fractions first, then format as
+    element+fraction pairs with no spaces, e.g. "W0.9Re0.1Ta0.05".
+    Pure W = "W1". Trace dopants at ppm: include them, e.g. "W0.99994K0.00006".
+    This field is used by the database pipeline to query Materials Project.
+    Never leave it null if composition_type and concentrations are known.
 
 # -----------------------------------------------------------------------------
 # FIELDS
@@ -135,6 +139,14 @@ fields:
     type: str
     description: "Unit for second_dopant_concentration — exactly one of: ppm / wt% / at%"
 
+  - name: composition_string
+    type: str
+    description: "CALCULATE THIS: composition in pymatgen format, atomic fractions. 
+      Pure W: 'W1'. W with 3wt% Re: convert to at% first then write 'W0.982Re0.018'. 
+      W with 60ppm K: 'W0.99994K0.00006'. 
+      Always use atomic fractions not weight fractions. 
+      Always normalize so fractions sum to 1.0. 
+      Use element symbols exactly as in the periodic table."
   # ── PROCESSING ──────────────────────────────────────────────────────────────
   - name: processing_history
     type: str
@@ -352,22 +364,21 @@ fields:
   # ── THERMODYNAMIC DESCRIPTORS ────────────────────────────────────────────────
   - name: VEC
     type: float
-    description: "CALCULATED: Valence electron concentration (see domain rules). Never null if composition known."
+    description: "PIPELINE-COMPUTED from composition — leave null, do not calculate"
 
   - name: delta_H_mix_kJ_mol
     type: float
     unit: "kJ/mol"
-    description: "CALCULATED: Enthalpy of mixing (Takeuchi-Inoue). 0.0 for pure W or trace-doped W."
+    description: "PIPELINE-COMPUTED — leave null, do not calculate"
 
   - name: delta_S_mix_J_mol_K
     type: float
     unit: "J/(mol K)"
-    description: "CALCULATED: Entropy of mixing. 0.0 for pure W or trace-doped W."
+    description: "PIPELINE-COMPUTED — leave null, do not calculate"
 
   - name: delta_atomic_size
     type: float
-    description: "CALCULATED: Atomic size mismatch parameter. 0.0 for pure W or trace-doped W."
-
+    description: "PIPELINE-COMPUTED — leave null, do not calculate"
   # ── PROVENANCE ───────────────────────────────────────────────────────────────
   - name: source_DOI
     type: str
