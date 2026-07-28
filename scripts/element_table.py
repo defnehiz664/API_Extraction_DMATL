@@ -22,9 +22,11 @@ CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "element_properti
 # Metallurgical VEC convention (group-derived valence electron count used
 # in HEA/refractory-alloy mixture rules) — not a mendeleev attribute.
 VEC_TABLE = {
-    "W": 6, "Re": 7, "Mo": 6, "Ta": 5, "Nb": 5, "Hf": 4, "Ti": 4, "Zr": 4,
-    "V": 5, "Cr": 6, "K": 1, "La": 3, "Y": 3, "Fe": 8, "Ni": 10, "Co": 9,
-    "Cu": 11, "C": 4, "O": 6, "N": 5, "Si": 4, "Al": 3,
+    "Cu": 11, "Ag": 11, "Al": 3, "Si": 4, "Zn": 12, "Sn": 4, "Ni": 10,
+    "Co": 9, "Mn": 7, "Mg": 2, "Fe": 8, "Cr": 6, "P": 5, "Pb": 4,
+    "Sb": 5, "Bi": 5, "Ti": 4, "Zr": 4, "W": 6, "Nb": 5, "Ta": 5,
+    "Li": 1, "Cd": 2, "S": 6, "Be": 2, "O": 6, "C": 4, "N": 5,
+    "Te": 6,
 }
 
 _PROPERTY_ATTRS = [

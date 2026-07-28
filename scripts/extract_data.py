@@ -613,7 +613,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--schema",
         default=DEFAULT_SCHEMA,
-        help=f"Path to schema YAML (default: schemas/w_dbtt/schema.yaml)",
+        help=f"Path to schema YAML (default: schemas/copper/schema.yaml)",
     )
 
     args = parser.parse_args()

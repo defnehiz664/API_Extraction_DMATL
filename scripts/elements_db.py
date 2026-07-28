@@ -1,5 +1,5 @@
 from mendeleev import element
-w = element("Re")
+w = element("Cu")
 for attr in dir(w):
     if not attr.startswith("_"):
         try:

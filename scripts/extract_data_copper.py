@@ -124,7 +124,7 @@ Your task is to extract structured data from a scientific paper about {material_
 STEP 1 — CONFIRM WHAT YOU CAN SEE
 ═══════════════════════════════════════════════════════════════
 Before extracting, briefly confirm in the first record's notes field:
-- Which figures you can read (e.g. "Confirmed: can read Fig.2 EBSD map, Fig.3 DBTT curve")
+- Which figures you can read (e.g. "Confirmed: can read hysteresis loop, cyclic stress response curve, strain-life (ε-N) plot, XRD diffractogram, SEM/BSE micrograph")
 - Which figures contain data you extracted from
 - Any figures that were unreadable or ambiguous
 - Whether supplementary material was provided and what it contained
@@ -139,9 +139,17 @@ GENERAL:
 - Each material/specimen gets its own JSON object
 - Use null for values not reported — never guess or invent values
 - For numeric fields return only the number, never include units in the value
-- Flag ALL uncertainties, methodology notes, and caveats in the notes field
-  using [tag] format: [methodology] [dbtt_methodology] [grain_size_methodology]
-  [graph_read] [derived] [scope_caveat] [finding]
+- - Flag ALL uncertainties, methodology notes, and caveats in the notes field
+  using [tag] format: [methodology] [fit_parameter] [grain_size_methodology]
+  [surrogate] [graph_read] [derived] [scope_caveat] [finding]
+
+  Tag meanings (use exactly):
+    [fit_parameter]  - a CM-Basquin/cyclic coefficient; say if tabulated, author-fit, or needs re-fitting
+    [surrogate]      - value is for a near-neighbor alloy/temper, not this specimen
+    [scope_caveat]   - value valid only under a stated restriction (temperature, R-ratio, environment)
+    [graph_read]     - digitized off a plot; add [high]/[low]
+    [derived]        - computed from other reported values, not measured
+    ... (one line each)
 
 RECORD ID:
 - Leave record_id as null — it will be assigned manually in Excel
@@ -613,7 +621,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--schema",
         default=DEFAULT_SCHEMA,
-        help=f"Path to schema YAML (default: schemas/w_dbtt/schema.yaml)",
+        help=f"Path to schema YAML (default: schemas/copper/schema.yaml)",
     )
 
     args = parser.parse_args()
