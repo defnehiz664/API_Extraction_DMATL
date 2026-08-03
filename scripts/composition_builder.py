@@ -1,15 +1,15 @@
 """
 composition_builder.py
 =======================
-Turns an extracted record (from extract_data.py output) into a clean
-composition dict: {"W": 0.97, "Re": 0.03} — atomic (mole) fractions.
+Turns an extracted record into a clean composition dict for Cu-based alloys,
+for example {"Cu": 0.97, "Zn": 0.03} — atomic (mole) fractions.
 
 Two input formats are supported:
   Format A: a `composition_string` field on the record, pymatgen-parseable
-            (e.g. "W0.97Re0.03"). Not currently emitted by the w_dbtt
-            schema, but supported so future schemas can add it directly.
-  Format B: reconstructed from the discrete fields the w_dbtt schema does
-            emit: composition_type, base_material_purity_pct,
+            (e.g. "Cu0.97Zn0.03"). This is supported so schemas can add
+            a direct composition string when available.
+  Format B: reconstructed from the discrete fields emitted by the schema:
+            composition_type, base_material_purity_pct,
             dopant_or_alloying_element, dopant_concentration (+unit),
             second_dopant_element, second_dopant_concentration (+unit).
 
@@ -20,7 +20,7 @@ the raw record fields directly.
 
 from mendeleev import element as mdlv_element
 
-BASE_ELEMENT = "W"
+BASE_ELEMENT = "Cu"
 
 
 def _atomic_weight(symbol: str) -> float:
@@ -36,7 +36,7 @@ def wt_to_at_fractions(wt_fractions: dict) -> dict:
 
 def _from_composition_string(comp_str: str):
     """
-    Parse a pymatgen-style formula string, e.g. "W0.982Re0.018", into
+    Parse a pymatgen-style formula string, e.g. "Cu0.982Zn0.018", into
     atomic (mole) fractions using pymatgen's own Composition parser.
     """
     from pymatgen.core import Composition
@@ -170,7 +170,7 @@ def build_composition(record: dict):
 
     Returns a dict:
       {
-        "fractions": {"W": 0.97, "Re": 0.03},   # atomic (mole) fractions, sum to 1.0
+        "fractions": {"Cu": 0.97, "Zn": 0.03},   # atomic (mole) fractions, sum to 1.0
         "format_used": "A_composition_string" | "B_pure" | "B_discrete_fields",
         "warnings": [str, ...],
       }

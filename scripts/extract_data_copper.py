@@ -10,8 +10,8 @@ Supports two input formats:
 Before extraction, runs a second Gemini call to classify every figure by
 type. Only figures matching SAVED_FIGURE_TYPES (currently: EBSD) are
 saved to disk — all figures are still sent to the main extraction call
-regardless, so DBTT curves/hardness plots/etc. are still read for data,
-they're just not kept as image files afterward.
+regardless, so property plots, micrographs, and other relevant figures are
+still read for data, they're just not kept as image files afterward.
 
 SETUP
 -----
@@ -88,13 +88,13 @@ FIGURES_DIR  = PROJECT_ROOT / "data" / "figures"
 PDF_DPI = 200
 
 FIGURE_TYPES = [
-    "microstructure",    # optical/SEM/TEM images of grain structure, porosity, precipitates
-    "DBTT_curve",        # DBTT vs. any parameter (grain size, temperature, dose, etc.)
-    "hardness",          # hardness maps, hardness vs. temperature/position plots
-    "EBSD",              # IPF maps, pole figures, grain boundary maps, misorientation plots
-    "fracture_surface",  # SEM images of fracture surfaces (intergranular, cleavage, etc.)
-    "map",               # EDS/WDS maps, strain maps, dislocation density maps, dose maps
-    "other",             # schematics, XRD patterns, stress-strain curves, flow charts, tables
+    "microstructure",          # optical/SEM/TEM images of grain structure, porosity, precipitates, inclusions
+    "property_curve",         # stress-strain, hardness, strength/ductility, conductivity/resistivity vs. temperature/processing plots
+    "phase_diagram",          # phase diagrams, constitution/processing maps, precipitation maps
+    "EBSD",                   # IPF maps, pole figures, grain boundary maps, misorientation plots
+    "fracture_surface",       # SEM images of fracture surfaces (intergranular, cleavage, etc.)
+    "map",                    # EDS/WDS maps, strain maps, dislocation density maps, texture maps
+    "other",                  # schematics, XRD patterns, photographs, tables, flow charts
 ]
 
 # ── CLASSIFICATION SCHEMA ─────────────────────────────────────────────────────
@@ -199,18 +199,19 @@ For each figure or page image provided, classify it into exactly one of these ty
 {types_formatted}
 
 Definitions:
-- microstructure: optical microscopy, SEM, or TEM images showing grain structure, porosity, or precipitates
-- DBTT_curve: plots of ductile-tofhardness vs. temperature, hardness vs. position plots
+- microstructure: optical microscopy, SEM, or TEM images showing grain structure, porosity, precipitates, or inclusions
+- property_curve: stress-strain curves, hardness/strength/ductility plots, conductivity/resistivity versus temperature or processing
+- phase_diagram: phase diagrams, constitution maps, precipitation/processing diagrams
 - EBSD: inverse pole figure maps, pole figures, grain boundary maps, misorientation angle distributions
 - fracture_surface: SEM images of fracture surfaces showing intergranular or cleavage fracture
-- map: EDS/WDS elemental maps, strain maps, dislocation density maps, dose maps
-- other: schematics, XRD patterns, stress-strain curves, processing diagrams, photographs of specimens
+- map: EDS/WDS elemental maps, strain maps, dislocation density maps, texture maps
+- other: schematics, XRD patterns, photographs of specimens, tables, flow charts
 
 For each figure, return:
 - figure_id: the label shown before the image (e.g. "gr1", "page_3")
 - figure_type: one of the types above
 - description: one sentence describing what is shown
-- contains_data: true if the figure contains quantitative data relevant to DBTT, microstructure, or mechanical properties
+- contains_data: true if the figure contains quantitative data relevant to copper-alloy composition, microstructure, or mechanical/electrical properties
 
 Return a JSON array — one object per figure.
 """

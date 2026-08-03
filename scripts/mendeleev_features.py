@@ -21,32 +21,38 @@ R_GAS = 8.314  # J / (mol K)
 # Glasses by Atomic Size Difference, Heat of Mixing and Period of
 # Constituent Elements and Its Application to Characterization of the
 # Main Alloying Element", Mater. Trans. 46(12), 2817-2829, Tables 1 & 2
-# (Miedema-model values). Values below were read directly off the
-# published tables for the element pairs this project's alloys actually
-# contain (W-based + Ni/Fe/Cu/Co system). Symmetric: (A,B) == (B,A).
-# Extend this table (with a source check, not a guess) if new alloying
-# elements start appearing in extracted records.
+# (Miedema-model values). For this Cu-alloy project, populate the table
+# with source-verified values for the alloying elements that appear in the
+# VEC lookup table and are relevant to your extraction schema.
+# Symmetric: (A,B) == (B,A).
 TAKEUCHI_INOUE_H_MIX = {
-    frozenset(("W", "Ti")): -6,
-    frozenset(("W", "V")): -1,
-    frozenset(("W", "Cr")): 1,
-    frozenset(("W", "Mn")): 6,
-    frozenset(("W", "Fe")): 0,
-    frozenset(("W", "Co")): -1,
-    frozenset(("W", "Ni")): -3,
-    frozenset(("W", "Cu")): 22,
-    frozenset(("W", "Zr")): -9,
-    frozenset(("W", "Nb")): -8,
-    frozenset(("W", "Mo")): 0,
-    frozenset(("W", "Ta")): -7,
-    frozenset(("W", "Re")): -4,
-    frozenset(("Re", "Ta")): -24,
-    frozenset(("Fe", "Ni")): -2,
-    frozenset(("Fe", "Cu")): 13,
-    frozenset(("Fe", "Co")): -1,
-    frozenset(("Ni", "Cu")): 4,
-    frozenset(("Co", "Ni")): 0,
-    frozenset(("Co", "Cu")): 6,
+    frozenset(("Cu", "Ag")): 0,
+    frozenset(("Cu", "Al")): -1,
+    frozenset(("Cu", "Si")): -19,
+    frozenset(("Cu", "Zn")): 1,
+    frozenset(("Cu", "Sn")): 0,
+    frozenset(("Cu", "Ni")): 4,
+    frozenset(("Cu", "Co")): 6,
+    frozenset(("Cu", "Mn")): 0,
+    frozenset(("Cu", "Mg")): -4,
+    frozenset(("Cu", "Fe")): 13,
+    frozenset(("Cu", "Cr")): 12,
+    frozenset(("Cu", "P")): -5,
+    frozenset(("Cu", "Pb")): 0,
+    frozenset(("Cu", "Sb")): 0,
+    frozenset(("Cu", "Bi")): 0,
+    frozenset(("Cu", "Ti")): -9,
+    frozenset(("Cu", "Zr")): -8,
+    frozenset(("Cu", "Nb")): -6,
+    frozenset(("Cu", "Ta")): -7,
+    frozenset(("Cu", "Li")): -2,
+    frozenset(("Cu", "Cd")): 0,
+    frozenset(("Cu", "S")): 0,
+    frozenset(("Cu", "Be")): 0,
+    frozenset(("Cu", "O")): 0,
+    frozenset(("Cu", "C")): 0,
+    frozenset(("Cu", "N")): 0,
+    frozenset(("Cu", "Te")): 0,
 }
 
 
@@ -88,36 +94,78 @@ def _weighted(fractions: dict, table, column: str):
     return sum(v * w for v, w in zip(vals, weights)) / total_w
 
 
-def _bcc_equivalent_lattice_constant(metallic_radius_pm: float) -> float:
+def _solute_vs_base_difference(fractions: dict, table, column: str, base_element: str = "Cu") -> float | None:
     """
-    For elements whose native lattice_structure isn't BCC, estimate the
-    lattice constant they WOULD have in a BCC arrangement, from atomic
-    (metallic) radius: a_bcc = (4/sqrt(3)) * r, with r in angstrom.
+    Compute a solute-vs-base descriptor as:
+      Des_solute = weighted average of solute properties
+      Delta_Des = Des_base - Des_solute
+
+    This is more informative for Cu-rich alloys than a plain composition-weighted
+    average, because it preserves the contrast between the Cu matrix and the
+    dopant/alloying additions.
+    """
+    if base_element not in fractions:
+        return None
+
+    base_value = table.loc[base_element, column]
+    if base_value is None or (isinstance(base_value, float) and math.isnan(base_value)):
+        return None
+
+    solute_fractions = {el: frac for el, frac in fractions.items() if el != base_element}
+    if not solute_fractions:
+        return 0.0
+
+    solute_values = []
+    solute_weights = []
+    for el, frac in solute_fractions.items():
+        v = table.loc[el, column]
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            continue
+        solute_values.append(v)
+        solute_weights.append(frac)
+
+    if not solute_values:
+        return 0.0
+
+    total_w = sum(solute_weights)
+    solute_value = sum(v * w for v, w in zip(solute_values, solute_weights)) / total_w
+    return base_value - solute_value
+
+
+def _fcc_equivalent_lattice_constant(metallic_radius_pm: float) -> float:
+    """
+    For elements whose native lattice_structure isn't FCC, estimate the
+    lattice constant they WOULD have in an FCC arrangement from atomic
+    (metallic) radius: a_fcc = (4/sqrt(2)) * r, with r in angstrom.
     """
     r_angstrom = metallic_radius_pm / 100.0
-    return (4.0 / math.sqrt(3.0)) * r_angstrom
+    return (4.0 / math.sqrt(2.0)) * r_angstrom
 
 
 def compute_mendeleev_features(fractions: dict, element_table) -> dict:
     """
-    fractions: {"W": 0.97, "Re": 0.03} atomic fractions, from composition_builder.
+    fractions: {"Cu": 0.97, "Zn": 0.03} atomic fractions, from composition_builder.
     element_table: DataFrame from element_table.build_element_table(), indexed
                    by symbol, containing all elements in `fractions`.
 
     Returns a flat dict of mendeleev_-prefixed features plus one frac_{el}
-    column per element present in the composition.
+    column per element present in the composition. Instead of a simple
+    composition-weighted average, the Cu-alloy descriptors are built as
+    solute-vs-base differences: the property of the solute/alloying fraction
+    is averaged first, then compared against the Cu matrix property.
     """
     out = {}
 
     for el, frac in fractions.items():
         out[f"frac_{el}"] = frac
 
-    out["mendeleev_atomic_radius_pm_weighted"] = _weighted(fractions, element_table, "atomic_radius")
-    out["mendeleev_metallic_radius_pm_weighted"] = _weighted(fractions, element_table, "metallic_radius")
-    out["mendeleev_atomic_weight_weighted"] = _weighted(fractions, element_table, "atomic_weight")
-    out["mendeleev_melting_point_K_weighted"] = _weighted(fractions, element_table, "melting_point")
-    out["mendeleev_density_g_cm3_weighted"] = _weighted(fractions, element_table, "density")
-    out["mendeleev_electronegativity_weighted"] = _weighted(fractions, element_table, "en_pauling")
+    # Solute-vs-base descriptors for Cu-rich alloys.
+    out["mendeleev_atomic_radius_pm_delta_vs_Cu"] = _solute_vs_base_difference(fractions, element_table, "atomic_radius", "Cu")
+    out["mendeleev_metallic_radius_pm_delta_vs_Cu"] = _solute_vs_base_difference(fractions, element_table, "metallic_radius", "Cu")
+    out["mendeleev_atomic_weight_delta_vs_Cu"] = _solute_vs_base_difference(fractions, element_table, "atomic_weight", "Cu")
+    out["mendeleev_melting_point_K_delta_vs_Cu"] = _solute_vs_base_difference(fractions, element_table, "melting_point", "Cu")
+    out["mendeleev_density_g_cm3_delta_vs_Cu"] = _solute_vs_base_difference(fractions, element_table, "density", "Cu")
+    out["mendeleev_electronegativity_delta_vs_Cu"] = _solute_vs_base_difference(fractions, element_table, "en_pauling", "Cu")
 
     out["mean_boiling_point_K"] = _weighted(fractions, element_table, "boiling_point")
     out["mean_fusion_heat_kJ_mol"] = _weighted(fractions, element_table, "fusion_heat")
@@ -125,23 +173,23 @@ def compute_mendeleev_features(fractions: dict, element_table) -> dict:
     out["mean_en_allen"] = _weighted(fractions, element_table, "en_allen")
     out["mean_electron_affinity_eV"] = _weighted(fractions, element_table, "electron_affinity")
 
-    # BCC-equivalent lattice constant per element, then a composition-weighted mixture.
-    a_bcc_per_el = {}
+    # FCC-equivalent lattice constant per element, then a composition-weighted mixture.
+    a_fcc_per_el = {}
     for el in fractions:
         row = element_table.loc[el]
-        if row.get("lattice_structure") == "BCC" and row.get("lattice_constant"):
-            a_bcc_per_el[el] = row["lattice_constant"]
+        if row.get("lattice_structure") == "FCC" and row.get("lattice_constant"):
+            a_fcc_per_el[el] = row["lattice_constant"]
         elif row.get("metallic_radius"):
-            a_bcc_per_el[el] = _bcc_equivalent_lattice_constant(row["metallic_radius"])
+            a_fcc_per_el[el] = _fcc_equivalent_lattice_constant(row["metallic_radius"])
         else:
-            a_bcc_per_el[el] = None
+            a_fcc_per_el[el] = None
 
-    valid_a = {el: a for el, a in a_bcc_per_el.items() if a is not None}
+    valid_a = {el: a for el, a in a_fcc_per_el.items() if a is not None}
     if valid_a:
         total_w = sum(fractions[el] for el in valid_a)
-        out["mendeleev_a_bcc_equiv_angstrom"] = sum(fractions[el] * a for el, a in valid_a.items()) / total_w
+        out["mendeleev_a_fcc_equiv_angstrom"] = sum(fractions[el] * a for el, a in valid_a.items()) / total_w
     else:
-        out["mendeleev_a_bcc_equiv_angstrom"] = None
+        out["mendeleev_a_fcc_equiv_angstrom"] = None
 
     # VEC (metallurgical convention table, see element_table.VEC_TABLE)
     vec_vals = element_table["VEC"]
@@ -183,6 +231,7 @@ def compute_mendeleev_features(fractions: dict, element_table) -> dict:
 
 
 def pd_isna(v):
+    """Return True for missing values such as None or NaN, and False otherwise."""
     try:
         return v is None or (isinstance(v, float) and math.isnan(v))
     except Exception:
