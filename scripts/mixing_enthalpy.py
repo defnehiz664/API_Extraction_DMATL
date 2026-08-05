@@ -9,11 +9,17 @@ set of elements, generated from matminer's tabulation of:
     Its Application to Characterization of the Main Alloying Element",
     Materials Transactions 46(12), 2817-2829.
 
-Regenerated from matminer at import, so bumping the dependency updates the data;
-ANCHOR_VALUES surfaces any silent change across matminer versions.
-
-Note this builds a FULL pairwise matrix (every element with every other), not just
-host pairs, because ΔH_mix of a mixture needs solute-solute terms too.
+    matminer is trusted as the source; we do not re-audit its numbers against the
+    paper. The element list comes from element_table.VEC_TABLE, the project's single
+    source of truth for supported elements, so this matrix and the property table
+    cannot drift apart.
+ 
+    Because requirements.txt allows matminer to upgrade (matminer>=0.10.1), the one
+    validation we keep is a golden-snapshot check: the full matrix is diffed against
+    a file committed in the repo, so a data change in a newer matminer release is
+    surfaced and reviewed instead of silently shifting everyone's features. This is a
+    reproducibility lock, not a correctness proof. Bless an intended change with
+    `python mixing_enthalpy.py --write-snapshot`.
 
 Three views are exported:
     H_MIX_FULL    -- every pair, NaN where no Miedema value exists.

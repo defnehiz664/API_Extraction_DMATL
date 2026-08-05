@@ -1,0 +1,5 @@
+Name: Spglib
+Description: The spglib library
+Version: 2.7.0
+Libs: -L/var/folders/bp/kmfmhnl95kx1c8x321z7twbw0000gn/T/tmptnlmv_g1/wheel/platlib/spglib/lib -lsymspg
+Cflags: -I/var/folders/bp/kmfmhnl95kx1c8x321z7twbw0000gn/T/tmptnlmv_g1/wheel/platlib/spglib/include

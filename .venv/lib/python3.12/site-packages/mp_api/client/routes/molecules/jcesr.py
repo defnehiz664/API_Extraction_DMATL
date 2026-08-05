@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import warnings
+from collections import defaultdict
+
+from emmet.core.molecules_jcesr import MoleculesDoc
+from pymatgen.core.periodic_table import Element
+
+from mp_api.client.core import BaseRester
+from mp_api.client.core.exceptions import MPRestWarning
+from mp_api.client.core.utils import validate_ids
+
+
+class JcesrMoleculesRester(BaseRester):
+    suffix = "molecules/jcesr"
+    document_model = MoleculesDoc  # type: ignore
+    primary_key = "task_id"
+    delta_backed = False
+
+    def __init__(self, **kwargs):
+        """Throw deprecation warning when JCESR client is initialized."""
+        warnings.warn(
+            "NOTE: You are accessing the unmaintained legacy molecules data, "
+            "please use MPRester.molecules.summary.",
+            category=MPRestWarning,
+            stacklevel=2,
+        )
+        super().__init__(**kwargs)
+
+    def search(
+        self,
+        task_ids: str | list[str] | None = None,
+        charge: tuple[float, float] | None = None,
+        elements: list[Element] | None = None,
+        EA: tuple[float, float] | None = None,
+        IE: tuple[float, float] | None = None,
+        nelements: tuple[float, float] | None = None,
+        pointgroup: str | None = None,
+        smiles: str | None = None,
+        num_chunks: int | None = None,
+        chunk_size: int = 1000,
+        all_fields: bool = True,
+        fields: list[str] | None = None,
+        _page: int | None = None,
+        _sort_fields: str | None = None,
+    ):
+        """Query legacy molecule docs using a variety of search criteria.
+
+        JCESR = Joint Center for Energy Storage Research
+
+        Arguments:
+            task_ids (str, List[str]): A single molecule task ID string or list of strings.
+                (e.g., mol-45004, [mol-45004, mol-45228]).
+            charge (Tuple[float,float]): Minimum and maximum value of the charge in +e to consider.
+            elements (List[Element]): A list of elements.
+            film_orientation (List[Elements]): List of elements that are in the molecule.
+            EA (Tuple[float,float]): Minimum and maximum value of the electron affinity in eV to consider.
+            IE (Tuple[float,float]): Minimum and maximum value of the ionization energy in eV to consider.
+            nelements (Tuple[float,float]): Minimum and maximum number of elements in the molecule to consider.
+            pointgroup (str): Point group of the molecule in Schoenflies notation.
+            smiles (str): The simplified molecular input line-entry system (SMILES) representation of the molecule.
+            num_chunks (int): Maximum number of chunks of data to yield. None will yield all possible.
+            chunk_size (int): Number of data entries per chunk.
+            all_fields (bool): Whether to return all fields in the document. Defaults to True.
+            fields (List[str]): List of fields in MoleculesDoc to return data for.
+                Default is the material_id only if all_fields is False.
+            _page (int or None) : Page of the results to skip to.
+            _sort_fields (str or None) : Field to sort on. Including a leading "-" sign will reverse sort order.
+
+        Returns:
+            ([MoleculesDoc]) List of molecule documents
+        """
+        query_params: dict = defaultdict(dict)
+
+        if task_ids:
+            if isinstance(task_ids, str):
+                task_ids = [task_ids]
+
+            query_params.update({"task_ids": ",".join(validate_ids(task_ids))})
+
+        if elements:
+            query_params.update({"elements": ",".join([str(ele) for ele in elements])})
+
+        _locals = locals()
+        for k in ("pointgroup", "smiles", "_page", "_sort_fields"):
+            if (v := _locals.get(k)) is not None:
+                query_params[k] = v
+
+        for k in ("nelements", "EA", "IE", "charge"):
+            if (vals := _locals.get(k)) is not None:
+                query_params.update({f"{k}_min": vals[0], f"{k}_max": vals[1]})
+
+        query_params = {
+            entry: query_params[entry]
+            for entry in query_params
+            if query_params[entry] is not None
+        }
+
+        return super()._search(
+            num_chunks=num_chunks,
+            chunk_size=chunk_size,
+            all_fields=all_fields,
+            fields=fields,
+            **query_params,
+        )

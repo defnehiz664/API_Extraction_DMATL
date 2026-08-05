@@ -1,0 +1,2 @@
+[console_scripts]
+pmg = pymatgen.cli.pmg:main

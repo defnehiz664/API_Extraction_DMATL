@@ -12,12 +12,15 @@ explains why — the pipeline degrades gracefully rather than failing.
 Phase selection logic:
   - Single-element (pure) systems: select the entry with
     energy_above_hull == 0.0 exactly — the defined ground state — rather
-    than "lowest energy_above_hull among near-hull candidates".
+    than "lowest energy_above_hull among near-hull candidates". That
+    phrasing is for choosing among competing near-degenerate multi-element
+    phases; applied to an element's own allotropes it can pick a
+    metastable polymorph (e.g. beta-W, Pm-3n) instead of the real ground
+    state (alpha-W, Im-3m) if the metastable one happens to be the only
+    "Cubic" entry within the hull window.
   - Multi-element systems: keep entries with energy_above_hull <= 0.1
     eV/atom (near-hull, since exact experimental phases are rarely the
-    DFT ground state), and choose the lowest energy_above_hull entry from
-    that filtered set. No structural prior is imposed, so the selection is
-    agnostic to BCC or cubic preferences.
+    DFT ground state).
   - Trace elements below MP_ELEMENT_FRACTION_THRESHOLD (1% atomic) are
     dropped from the query composition entirely — MP has no entries for
     arbitrary dilute alloys like W + 80 wtppm K, so those systems are
@@ -52,7 +55,6 @@ _EMPTY_FEATURES = {
     "mp_crystal_system": None,
     "mp_spacegroup_symbol": None,
     "mp_is_stable": None,
-    "mp_bcc_assumption_applied": None,
     "mp_all_phases_found": None,
     "mp_query_skipped": None,
 }
@@ -125,12 +127,23 @@ def _select_phase(docs: list, n_elements: int) -> dict:
     all_phases_found = len(near_hull) > 0
 
     pool = near_hull if near_hull else docs
-    if pool:
-        chosen = min(pool, key=_e_hull)
-    else:
-        return None, all_phases_found, False
+    bcc_assumption_applied = False
 
-    return chosen, all_phases_found, False
+    def is_bcc_or_cubic(d):
+        sym = d.get("symmetry") or {}
+        crystal_system = sym.get("crystal_system") if isinstance(sym, dict) else getattr(sym, "crystal_system", None)
+        return crystal_system in ("Cubic",)
+
+    bcc_candidates = [d for d in pool if is_bcc_or_cubic(d)]
+    if bcc_candidates:
+        chosen = min(bcc_candidates, key=_e_hull)
+    elif pool:
+        chosen = min(pool, key=_e_hull)
+        bcc_assumption_applied = True
+    else:
+        return None, all_phases_found, bcc_assumption_applied
+
+    return chosen, all_phases_found, bcc_assumption_applied
 
 
 def compute_mp_features(fractions: dict) -> dict:
@@ -184,7 +197,7 @@ def compute_mp_features(fractions: dict) -> dict:
         out["mp_query_skipped"] = "no matching entries returned by Materials Project"
         return out
 
-    chosen, all_phases_found, _ = _select_phase(docs, len(query_fractions))
+    chosen, all_phases_found, bcc_assumption_applied = _select_phase(docs, len(query_fractions))
     if chosen is None:
         out = dict(_EMPTY_FEATURES)
         out["mp_formula"] = formula
@@ -206,7 +219,6 @@ def compute_mp_features(fractions: dict) -> dict:
         "mp_crystal_system": sym.get("crystal_system") if isinstance(sym, dict) else None,
         "mp_spacegroup_symbol": sym.get("symbol") if isinstance(sym, dict) else None,
         "mp_is_stable": chosen.get("is_stable"),
-        "mp_bcc_assumption_applied": False,
         "mp_all_phases_found": all_phases_found,
         "mp_query_skipped": None,
     }
