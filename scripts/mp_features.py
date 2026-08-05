@@ -113,42 +113,30 @@ def _select_phase(docs: list, n_elements: int) -> dict:
     # that phrasing is for competing near-degenerate multi-element phases,
     # not for picking among an element's own allotropes/polymorphs, some
     # of which can sit inside the 0.1 eV/atom window without being the
-    # actual reference state (e.g. metastable FCC/HCP W entries).
+    # actual reference states.
     if n_elements == 1:
         ground_state = [d for d in docs if abs(_e_hull(d)) <= GROUND_STATE_EV_ATOM_TOLERANCE]
         if ground_state:
             # Should be unique; if MP has duplicate hull entries, prefer the stable one.
             chosen = min(ground_state, key=lambda d: 0 if d.get("is_stable") else 1)
-            return chosen, True, False
-        # No exact-zero entry returned — fall through to the general logic
-        # below with bcc_assumption_applied left for that path to set.
+            return chosen, True
+       
 
     near_hull = [d for d in docs if _e_hull(d) <= HULL_THRESHOLD_EV_ATOM]
     all_phases_found = len(near_hull) > 0
-
     pool = near_hull if near_hull else docs
-    bcc_assumption_applied = False
 
-    def is_bcc_or_cubic(d):
-        sym = d.get("symmetry") or {}
-        crystal_system = sym.get("crystal_system") if isinstance(sym, dict) else getattr(sym, "crystal_system", None)
-        return crystal_system in ("Cubic",)
+    if not pool:
+        return None, False
 
-    bcc_candidates = [d for d in pool if is_bcc_or_cubic(d)]
-    if bcc_candidates:
-        chosen = min(bcc_candidates, key=_e_hull)
-    elif pool:
-        chosen = min(pool, key=_e_hull)
-        bcc_assumption_applied = True
-    else:
-        return None, all_phases_found, bcc_assumption_applied
+    chosen = min(pool, key=lambda d: (_e_hull(d), 0 if d.get("is_stable") else 1))
+    return chosen, all_phases_found
 
-    return chosen, all_phases_found, bcc_assumption_applied
 
 
 def compute_mp_features(fractions: dict) -> dict:
     """
-    fractions: {"W": 0.97, "Re": 0.03} atomic fractions, from composition_builder.
+    fractions: {"Cu": 0.97, "Zn": 0.03} atomic fractions, from composition_builder.
     Returns a flat dict of mp_-prefixed features. Cached to mp_cache/ by
     composition formula so repeat pipeline runs don't re-hit the API.
     """
@@ -197,7 +185,7 @@ def compute_mp_features(fractions: dict) -> dict:
         out["mp_query_skipped"] = "no matching entries returned by Materials Project"
         return out
 
-    chosen, all_phases_found, bcc_assumption_applied = _select_phase(docs, len(query_fractions))
+    chosen, all_phases_found = _select_phase(docs, len(query_fractions))
     if chosen is None:
         out = dict(_EMPTY_FEATURES)
         out["mp_formula"] = formula
