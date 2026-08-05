@@ -36,8 +36,10 @@ _PROPERTY_ATTRS = [
     "atomic_weight",
     "atomic_radius",       # pm
     "metallic_radius",     # pm
+    "metallic_radius_c12", # pm, Metallic radius with 12 nearest neighbors
     "covalent_radius_pyykko",  # pm
     "melting_point",       # K
+    "is_transition",       # indicates if the listed melting_point value represents a solid-state phase transition (allotropic transformation) rather than a true solid-to-liquid melting point
     "boiling_point",       # K
     "density",             # g/cm3
     "lattice_structure",
@@ -48,6 +50,10 @@ _PROPERTY_ATTRS = [
     "thermal_conductivity",  # W/(m*K)
     "electron_affinity",   # eV
     "ionenergies",         # dict keyed by ionization stage; [1] = first ionization energy
+    "en_miedema"            # electronegativity (Miedema scale, for solid and liquid metal alloys)
+    "miedema_electron_density" # electron density at the Wigner-Seitz cell boundary (Miedema scale)
+    "nvalence"                # number of valence electrons
+    "pettifor_number"          # Pettifor chemical scale number allows to predict the crystal structures of binary compounds and alloys based on their chemical composition.
 ]
 
 
