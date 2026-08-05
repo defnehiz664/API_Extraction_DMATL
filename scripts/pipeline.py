@@ -168,7 +168,7 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, log_out: Path):
                 if mp_feats.get("mp_query_skipped"):
                     log_lines.append(f"  mp features skipped: {mp_feats['mp_query_skipped']}")
                 else:
-                    log_lines.append(f"  mp features: OK (material_id={mp_feats.get('mp_material_id')}, bcc_assumption_applied={mp_feats.get('mp_bcc_assumption_applied')}, all_phases_found={mp_feats.get('mp_all_phases_found')})")
+                    log_lines.append(f"  mp features: OK (material_id={mp_feats.get('mp_material_id')}, all_phases_found={mp_feats.get('mp_all_phases_found')})")
         except Exception as e:
             log_lines.append(f"  mp features FAILED: {e}")
             mp_feats = {}

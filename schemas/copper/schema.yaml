@@ -148,12 +148,12 @@ fields:
 
   - name: composition_string
     type: str
-    description: "CALCULATE THIS: composition in pymatgen format, atomic fractions. 
-      Pure W: 'W1'. W with 3wt% Re: convert to at% first then write 'W0.982Re0.018'. 
-      W with 60ppm K: 'W0.99994K0.00006'. 
-      Always use atomic fractions not weight fractions. 
-      Always normalize so fractions sum to 1.0. 
-      Use element symbols exactly as in the periodic table."
+    description: "CALCULATE THIS: composition in pymatgen-style format, using atomic fractions. 
+      Pure Cu: 'Cu1'. Cu with 3wt% Zn: convert to at% first then write 'Cu0.982Zn0.018'. 
+      Cu with 60ppm Ti: 'Cu0.99994Ti0.00006'. 
+      Always use atomic fractions, not weight fractions. 
+      Always normalize so the fractions sum to 1.0. 
+      Use element symbols exactly as in the periodic table, e.g. Cu, Ag, Al, Si, Zn, Sn, Ni, Co, Mn, Mg, Fe, Cr, P, Pb, Sb, Bi, Ti, Zr, Nb, Ta, Li, Cd, S, Be, O, C, N, Te."
 
   - name: alloying_element_concentrations
     type: str
