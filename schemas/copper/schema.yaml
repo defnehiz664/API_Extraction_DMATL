@@ -493,10 +493,13 @@ tests:
       - {name: cyclic_strain_hardening_exponent_n_prime, type: float, description: "Cyclic strain-hardening exponent n'"}
       - {name: transition_fatigue_life_2Nt, type: float, description: "Transition reversals (elastic = plastic), if reported"}
       - name: data_points
-        type: list
-        description: "Strain-life curve: one entry per tested amplitude, each with
-          total_strain_amplitude_pct, plastic_strain_amplitude_pct, elastic_strain_amplitude_pct,
-          stress_amplitude_MPa (half-life), cycles_to_failure_Nf. Every reported point; null if only constants given."
+        item_fields:
+        - {name: total_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: plastic_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: elastic_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: stress_amplitude_MPa, type: float, unit: MPa}
+        - {name: cycles_to_failure_Nf, type: float}
+        description: "Strain-life curve: one entry per tested amplitude. Every reported point; null if only constants given."
 
 # -----------------------------------------------------------------------------
 # CHARACTERIZATION BLOCKS  (nested; acquisition params + method-EXCLUSIVE outputs)
