@@ -1,20 +1,8 @@
 [
   {
-    "doi": "10.1016/j.jmst.2026.01.050",
+    "doi": "10.1016/j.ijfatigue.2016.07.019",
     "status": "full_text",
-    "filename": "c:\\Users\\dinaa\\OneDrive\\Desktop\\API_Extraction_D-MATL\\data\\papers\\10-1016_j-jmst-2026-01-050.xml",
-    "message": "Full text XML saved (336759 chars)"
-  },
-  {
-    "doi": "10.4236/ojapps.2013.31003",
-    "status": "pdf_downloaded",
-    "filename": "c:\\Users\\dinaa\\OneDrive\\Desktop\\API_Extraction_D-MATL\\data\\papers\\10-4236_ojapps-2013-31003.pdf",
-    "message": "PDF from publisher source"
-  },
-  {
-    "doi": "10.1016/j.jnucmat.2020.152664",
-    "status": "full_text",
-    "filename": "c:\\Users\\dinaa\\OneDrive\\Desktop\\API_Extraction_D-MATL\\data\\papers\\10-1016_j-jnucmat-2020-152664.xml",
-    "message": "Full text XML saved (365629 chars)"
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-ijfatigue-2016-07-019.xml",
+    "message": "Full text XML saved (267308 chars)"
   }
 ]
