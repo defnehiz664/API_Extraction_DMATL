@@ -55,6 +55,14 @@ _EMPTY_FEATURES = {
     "mp_crystal_system": None,
     "mp_spacegroup_symbol": None,
     "mp_is_stable": None,
+    "mp_efermi_eV": None,
+    "mp_homogeneous_poisson": None,
+    "mp_weighted_work_function_eV": None,
+    "mp_young_modulus_GPa": None,
+    "mp_debye_temperature_K": None,
+    "mp_thermal_conductivity_W_mK": None,
+    "mp_weighted_surface_energy_J_m2": None,
+    "mp_surface_anisotropy": None,
     "mp_all_phases_found": None,
     "mp_query_skipped": None,
 }
@@ -88,7 +96,9 @@ def _query_materials_project(elements: list, api_key: str) -> list:
             fields=[
                 "material_id", "formula_pretty", "symmetry",
                 "formation_energy_per_atom", "energy_above_hull",
-                "bulk_modulus", "shear_modulus", "is_stable",
+                "bulk_modulus", "shear_modulus", "is_stable", 
+                "efermi", "elasticity", "debye_temperature",
+                "thermal_conductivity",
             ],
         )
     return [d.dict() if hasattr(d, "dict") else dict(d) for d in docs]
@@ -196,6 +206,7 @@ def compute_mp_features(fractions: dict) -> dict:
     bulk = chosen.get("bulk_modulus") or {}
     shear = chosen.get("shear_modulus") or {}
     sym = chosen.get("symmetry") or {}
+    elasticity = chosen.get("elasticity") or {}
 
     return {
         "mp_material_id": chosen.get("material_id"),
@@ -207,6 +218,11 @@ def compute_mp_features(fractions: dict) -> dict:
         "mp_crystal_system": sym.get("crystal_system") if isinstance(sym, dict) else None,
         "mp_spacegroup_symbol": sym.get("symbol") if isinstance(sym, dict) else None,
         "mp_is_stable": chosen.get("is_stable"),
+        "mp_efermi_eV": chosen.get("efermi"),
+        "mp_homogeneous_poisson": elasticity.get("homogeneous_poisson"),
+        "mp_young_modulus_GPa": elasticity.get("youngs_modulus"),
+        "mp_debye_temperature_K": chosen.get("debye_temperature"),
+        "mp_thermal_conductivity_W_mK": chosen.get("thermal_conductivity"),
         "mp_all_phases_found": all_phases_found,
         "mp_query_skipped": None,
     }

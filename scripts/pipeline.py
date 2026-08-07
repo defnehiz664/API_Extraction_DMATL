@@ -42,7 +42,7 @@ from composition_builder import build_composition
 from element_table import build_element_table
 from mendeleev_features import compute_mendeleev_features
 from mp_features import compute_mp_features, skipped_mp_features
-from usfe_features import compute_usfe_features
+#from usfe_features import compute_usfe_features
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUTS_DIR = REPO_ROOT / "data" / "outputs"
@@ -173,12 +173,12 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, log_out: Path):
             log_lines.append(f"  mp features FAILED: {e}")
             mp_feats = {}
 
-        try:
-            usfe_feats = compute_usfe_features(fractions, mp_features=mp_feats, mendeleev_features=mendeleev_feats)
-            row.update(usfe_feats)
-            log_lines.append(f"  usfe features: OK ({usfe_feats['usfe_approximation_note']})")
-        except Exception as e:
-            log_lines.append(f"  usfe features FAILED: {e}")
+            #try:
+            #usfe_feats = compute_usfe_features(fractions, mp_features=mp_feats, mendeleev_features=mendeleev_feats)
+            #row.update(usfe_feats)
+            #log_lines.append(f"  usfe features: OK ({usfe_feats['usfe_approximation_note']})")
+        #except Exception as e:
+            #log_lines.append(f"  usfe features FAILED: {e}")
 
         rows.append(row)
 

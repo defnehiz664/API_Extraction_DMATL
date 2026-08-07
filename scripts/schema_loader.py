@@ -13,28 +13,48 @@ YAML structure:
 A field may declare `item_fields` to become a list of sub-objects.
 """
 
+from dataclasses import field
+from xml.parsers.expat import model
+
 import yaml
 from pathlib import Path
 from typing import Optional
 from pydantic import create_model, BaseModel
 
 _SCALARS = {"str": str, "float": float, "int": int, "bool": bool}
-_LIST_SCALARS = {"list[str]": list[str], "list[float]": list[float]}
+_LIST_SCALARS = {
+    "list[str]": list[str],
+    "list[float]": list[float],
+    "list[int]": list[int],
+    "list[bool]": list[bool],
+}
 _BLOCK_PARTS = ("conditions", "specimen", "results")
 
 
 def _resolve(field: dict, ns: str) -> tuple:
     """Map one field dict to a (annotation, default) pair, recursing into item_fields."""
     name, ftype = field["name"], field.get("type", "str")
+
     if "item_fields" in field:
-        item_model = _model(f"{ns}__{name}_item", field["item_fields"])
+        item_model = _model(f"{ns}_{name}_item", field["item_fields"])
         return (Optional[list[item_model]], None)
+
     if ftype in _SCALARS:
         return (Optional[_SCALARS[ftype]], None)
+
     if ftype in _LIST_SCALARS:
         return (Optional[_LIST_SCALARS[ftype]], None)
-    raise ValueError(f"Unknown type '{ftype}' for field '{name}' (in {ns})")
 
+    if ftype in {"list", "array", "list[dict]", "list[object]"}:
+        return (Optional[list], None)
+
+    if ftype in {"dict", "object", "mapping"}:
+        return (Optional[dict], None)
+
+    raise ValueError(
+        "Unknown type '{ftype}' for field '{name}' (in {ns}). "
+        "Supported types: str, float, int, bool, list[str], list[float], "
+        "list[int], list[bool], list, list[dict], dict, object.")
 
 def _model(name: str, fields: list) -> type[BaseModel]:
     """Build a Pydantic model from a flat list of field dicts."""
@@ -106,3 +126,18 @@ def build_schema_prompt_section(config: dict) -> str:
                 for f in (block.get(part) or []):
                     lines.append(_field_line(f))
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    import sys
+
+    schema_arg = "/Users/defnehiz/API_Extraction_DMATL-1/schemas/copper/schema.yaml"
+    if schema_arg is None:
+        print("No schema path provided. Usage: python scripts/schema_loader.py <schema.yaml>")
+        sys.exit(1)
+
+    schema_path = Path(schema_arg)
+    model, config = load_schema(schema_path)
+    print(f"Loaded schema from {schema_path}")
+    print(f"Generated Pydantic model: {model.__name__}")
+    print("schema_loader.py ran successfully.")

@@ -16,44 +16,7 @@ from itertools import combinations
 
 R_GAS = 8.314  # J / (mol K)
 
-# Binary regular-solution enthalpy of mixing, Hmix{AB} in kJ/mol, from
-# Takeuchi, A. and Inoue, A. (2005), "Classification of Bulk Metallic
-# Glasses by Atomic Size Difference, Heat of Mixing and Period of
-# Constituent Elements and Its Application to Characterization of the
-# Main Alloying Element", Mater. Trans. 46(12), 2817-2829, Tables 1 & 2
-# (Miedema-model values). For this Cu-alloy project, populate the table
-# with source-verified values for the alloying elements that appear in the
-# VEC lookup table and are relevant to your extraction schema.
-# Symmetric: (A,B) == (B,A).
-TAKEUCHI_INOUE_H_MIX = {
-    frozenset(("Cu", "Ag")): 0,
-    frozenset(("Cu", "Al")): -1,
-    frozenset(("Cu", "Si")): -19,
-    frozenset(("Cu", "Zn")): 1,
-    frozenset(("Cu", "Sn")): 0,
-    frozenset(("Cu", "Ni")): 4,
-    frozenset(("Cu", "Co")): 6,
-    frozenset(("Cu", "Mn")): 0,
-    frozenset(("Cu", "Mg")): -4,
-    frozenset(("Cu", "Fe")): 13,
-    frozenset(("Cu", "Cr")): 12,
-    frozenset(("Cu", "P")): -5,
-    frozenset(("Cu", "Pb")): 0,
-    frozenset(("Cu", "Sb")): 0,
-    frozenset(("Cu", "Bi")): 0,
-    frozenset(("Cu", "Ti")): -9,
-    frozenset(("Cu", "Zr")): -8,
-    frozenset(("Cu", "Nb")): -6,
-    frozenset(("Cu", "Ta")): -7,
-    frozenset(("Cu", "Li")): -2,
-    frozenset(("Cu", "Cd")): 0,
-    frozenset(("Cu", "S")): 0,
-    frozenset(("Cu", "Be")): 0,
-    frozenset(("Cu", "O")): 0,
-    frozenset(("Cu", "C")): 0,
-    frozenset(("Cu", "N")): 0,
-    frozenset(("Cu", "Te")): 0,
-}
+from mixing_enthalpy import H_MIX_USABLE as TAKEUCHI_INOUE_H_MIX
 
 
 def _delta_h_mix(fractions: dict):
@@ -201,6 +164,7 @@ def compute_mendeleev_features(fractions: dict, element_table) -> dict:
         out["mendeleev_vec_missing_elements"] = missing
 
     # Atomic size mismatch (delta), Takeuchi-Inoue style, using metallic radius.
+    out["mendeleev_metallic_radius_pm_weighted"] = _weighted(fractions, element_table, "metallic_radius")
     r_bar = out["mendeleev_metallic_radius_pm_weighted"]
     if r_bar:
         variance = sum(

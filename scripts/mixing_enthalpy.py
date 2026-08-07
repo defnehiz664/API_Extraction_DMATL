@@ -31,6 +31,7 @@ Three views are exported:
 from __future__ import annotations
 
 import math
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from itertools import combinations
 
