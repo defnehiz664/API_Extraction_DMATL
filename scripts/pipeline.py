@@ -47,6 +47,7 @@ from mp_features import compute_mp_features, skipped_mp_features
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUTS_DIR = REPO_ROOT / "data" / "outputs"
 DEFAULT_CSV_OUT = REPO_ROOT / "data" / "features_output.csv"
+DEFAULT_XLSX_OUT = REPO_ROOT / "data" / "features_output.xlsx"
 DEFAULT_LOG_OUT = REPO_ROOT / "data" / "feature_log.txt"
 
 # The pipeline's mendeleev-computed values are authoritative over whatever
@@ -88,7 +89,29 @@ def load_all_records(outputs_dir: Path) -> list:
     return records
 
 
-def run_pipeline(outputs_dir: Path, csv_out: Path, log_out: Path):
+def _write_excel_output(df: pd.DataFrame, excel_out: Path):
+    """Write all records to Excel; if nested blocks are present, add one sheet per block."""
+    excel_out.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(excel_out, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="records", index=False)
+
+        nested_block_names = []
+        for col in df.columns:
+            if isinstance(df[col].iloc[0] if not df.empty else None, dict):
+                nested_block_names.append(col)
+
+        for block_name in nested_block_names:
+            block_rows = []
+            for _, row in df.iterrows():
+                value = row.get(block_name)
+                if isinstance(value, dict):
+                    block_row = {"record_id": row.get("record_id") or row.get("material_name") or "unknown", **value}
+                    block_rows.append(block_row)
+            if block_rows:
+                pd.DataFrame(block_rows).to_excel(writer, sheet_name=block_name[:31], index=False)
+
+
+def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Path):
     records = load_all_records(outputs_dir)
     print(f"[pipeline] loaded {len(records)} record(s) from {outputs_dir}")
 
@@ -185,9 +208,11 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, log_out: Path):
     df = pd.DataFrame(rows)
     csv_out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv_out, index=False)
+    _write_excel_output(df, excel_out)
     log_out.write_text("\n".join(log_lines), encoding="utf-8")
 
     print(f"[pipeline] wrote {len(df)} row(s) to {csv_out}")
+    print(f"[pipeline] wrote {len(df)} row(s) to {excel_out}")
     print(f"[pipeline] wrote log to {log_out}")
 
 
@@ -195,10 +220,11 @@ def main():
     parser = argparse.ArgumentParser(description="Feature enrichment pipeline for extracted W-DBTT records")
     parser.add_argument("--outputs-dir", default=str(DEFAULT_OUTPUTS_DIR))
     parser.add_argument("--out", default=str(DEFAULT_CSV_OUT))
+    parser.add_argument("--excel", default=str(DEFAULT_XLSX_OUT))
     parser.add_argument("--log", default=str(DEFAULT_LOG_OUT))
     args = parser.parse_args()
 
-    run_pipeline(Path(args.outputs_dir), Path(args.out), Path(args.log))
+    run_pipeline(Path(args.outputs_dir), Path(args.out), Path(args.excel), Path(args.log))
 
 
 if __name__ == "__main__":

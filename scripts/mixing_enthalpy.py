@@ -34,8 +34,7 @@ import math
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from itertools import combinations
-
-from click import Path
+from pathlib import Path
 
 from matminer.utils.data import MixingEnthalpy
 from pymatgen.core import Element
@@ -96,6 +95,10 @@ def _label(pair):
 
 def _load_snapshot(path=REFERENCE_SNAPSHOT):
     """Read the golden snapshot into {frozenset({A,B}): value|nan}. '#' lines skipped."""
+    if not Path(path).exists():
+        raise FileNotFoundError(
+            f"Snapshot not found: {path}. Run: python {Path(__file__).name} --write-snapshot"
+        )
     snap = {}
     with open(path) as fh:
         for line in fh:
@@ -165,11 +168,21 @@ if __name__ == "__main__":
         n = write_snapshot()
         print(f"# wrote {n} pairs to {REFERENCE_SNAPSHOT.name} (matminer {matminer_version()})")
         sys.exit(0)
- 
+
+    if not REFERENCE_SNAPSHOT.exists():
+        print(f"# snapshot missing: {REFERENCE_SNAPSHOT}")
+        print("# generate it once with:  python scripts/mixing_enthalpy.py --write-snapshot")
+        sys.exit(2)
+
     print(f"# matminer = {matminer_version()}   elements = {len(ELEMENTS)}")
     print(f"# {len(H_MIX_USABLE)} usable pairs   {len(ABSENT_PAIRS)} absent")
- 
-    diff = verify_against_snapshot()
+
+    try:
+        diff = verify_against_snapshot()
+    except FileNotFoundError as exc:
+        print(f"# {exc}")
+        sys.exit(2)
+
     if any(diff.values()):
         print("# FAIL: full matrix differs from the committed snapshot:")
         for pair, (got, expected) in diff["changed"].items():

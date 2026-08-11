@@ -77,7 +77,7 @@ if not GOOGLE_CLOUD_PROJECT:
         "Then run: gcloud auth application-default login"
     )
 
-MODEL        = "gemini-2.5-flash" 
+MODEL        = "gemini-3.5-flash" 
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -96,15 +96,6 @@ FIGURE_TYPES = [
     "map",                    # EDS/WDS maps, strain maps, dislocation density maps, texture maps
     "other",                  # schematics, XRD patterns, photographs, tables, flow charts
 ]
-
-# ── CLASSIFICATION SCHEMA ─────────────────────────────────────────────────────
-
-class FigureInfo(BaseModel):
-    figure_id: str        # matches the label used in the extraction (e.g. "gr1", "page_3")
-    figure_type: str      # one of FIGURE_TYPES
-    description: str      # one sentence describing what the figure shows
-    contains_data: bool   # True if the figure contains quantitative data useful for extraction
-
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -190,32 +181,6 @@ STEP 4 — OUTPUT FORMAT
 - Use null (not empty string, not 0) for unreported values
 - source_DOI = "{doi}" for all rows from this paper
 - source_figure_or_table: cite the specific figure/table for each value, e.g. "Table 2, Fig.3a"
-"""
-
-
-def build_classification_prompt() -> str:
-    types_formatted = "\n".join(f'  - "{t}"' for t in FIGURE_TYPES)
-    return f"""You are a materials science figure classification assistant.
-
-For each figure or page image provided, classify it into exactly one of these types:
-{types_formatted}
-
-Definitions:
-- microstructure: optical microscopy, SEM, or TEM images showing grain structure, porosity, precipitates, or inclusions
-- property_curve: stress-strain curves, hardness/strength/ductility plots, conductivity/resistivity versus temperature or processing
-- phase_diagram: phase diagrams, constitution maps, precipitation/processing diagrams
-- EBSD: inverse pole figure maps, pole figures, grain boundary maps, misorientation angle distributions
-- fracture_surface: SEM images of fracture surfaces showing intergranular or cleavage fracture
-- map: EDS/WDS elemental maps, strain maps, dislocation density maps, texture maps
-- other: schematics, XRD patterns, photographs of specimens, tables, flow charts
-
-For each figure, return:
-- figure_id: the label shown before the image (e.g. "gr1", "page_3")
-- figure_type: one of the types above
-- description: one sentence describing what is shown
-- contains_data: true if the figure contains quantitative data relevant to copper-alloy composition, microstructure, or mechanical/electrical properties
-
-Return a JSON array — one object per figure.
 """
 
 
@@ -354,23 +319,27 @@ def find_supplementary_docx(doi: str) -> list[Path]:
 SAVED_FIGURE_TYPES = {"EBSD"}
 
 
+def _ebsd_figure_ids_from_env() -> set[str]:
+    raw = os.environ.get("EBSD_FIGURE_LABELS", "")
+    return {label.strip() for label in raw.split(",") if label.strip()}
+
+
 def save_selected_figures(
     doi_slug: str,
     content_parts: list[tuple[str, bytes, str]],
-    classifications: list[dict],
+    allowed_labels: set[str] | None = None,
 ) -> Path:
-    """
-    Save only figures whose classified type is in SAVED_FIGURE_TYPES to
-    data/figures/{doi_slug}/, named {doi_slug}_{label}.{ext}. Figures are
-    still sent to Gemini for the main extraction call regardless of
-    whether they're saved here — this only controls what's kept on disk.
-    """
+    """Save only explicitly allowed EBSD figures without an extra Gemini classification pass."""
     figures_dir = FIGURES_DIR / doi_slug
-    type_by_label = {c.get("figure_id", ""): c.get("figure_type", "") for c in classifications}
+    allowed = allowed_labels if allowed_labels is not None else _ebsd_figure_ids_from_env()
+
+    if not allowed:
+        print("  No EBSD figure IDs configured; skipping figure saving to avoid unnecessary classification calls.")
+        return figures_dir
 
     saved = 0
     for label, img_bytes, mime in content_parts:
-        if type_by_label.get(label) not in SAVED_FIGURE_TYPES:
+        if label not in allowed:
             continue
         figures_dir.mkdir(parents=True, exist_ok=True)
         ext      = "png" if "png" in mime else "jpg"
@@ -378,47 +347,8 @@ def save_selected_figures(
         out_path.write_bytes(img_bytes)
         saved += 1
 
-    print(f"  Saved {saved}/{len(content_parts)} figures to {figures_dir} (types kept: {sorted(SAVED_FIGURE_TYPES)})")
+    print(f"  Saved {saved}/{len(content_parts)} EBSD figures to {figures_dir} (allowed IDs: {sorted(allowed)})")
     return figures_dir
-
-
-# ── FIGURE CLASSIFICATION ─────────────────────────────────────────────────────
-
-def classify_figures(
-    content_parts: list[tuple[str, bytes, str]],
-    client: genai.Client,
-) -> list[dict]:
-    """
-    Send all figures to Gemini in a separate lightweight call and ask it to
-    classify each one by type and describe what it shows.
-    """
-    if not content_parts:
-        return []
-
-    print(f"  Classifying {len(content_parts)} figures...")
-
-    contents = [build_classification_prompt()]
-    for label, img_bytes, mime in content_parts:
-        contents.append(f"\n[{label}:]")
-        contents.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
-
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=4096,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-            response_mime_type="application/json",
-            response_schema=list[FigureInfo],
-        ),
-    )
-
-    try:
-        return json.loads(response.text)
-    except json.JSONDecodeError:
-        print("  Classification parse failed — no figures will be saved (can't determine type)")
-        return []
 
 
 # ── BATCH MODE ────────────────────────────────────────────────────────────────
@@ -514,14 +444,11 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         location=GOOGLE_CLOUD_LOCATION,
     )
 
-    # ── Step 4: Classify figures (separate lightweight call) ──────────────────
-    print(f"\nClassifying figures...")
-    classifications = classify_figures(content_parts, client)
+    # ── Step 4: Save only explicitly configured EBSD figures (no extra classification pass) ─
+    ebsd_labels = _ebsd_figure_ids_from_env() or {"gr12"}
+    figures_dir = save_selected_figures(doi_slug, content_parts, ebsd_labels)
 
-    # ── Step 5: Save only figures matching SAVED_FIGURE_TYPES ─────────────────
-    figures_dir = save_selected_figures(doi_slug, content_parts, classifications)
-
-    # ── Step 6: Extract structured data ───────────────────────────────────────
+    # ── Step 5: Extract structured data ───────────────────────────────────────
     n_parts = len(content_parts)
     unit    = "pages" if input_format == "pdf" else "figures"
     print(f"\nExtracting data with Gemini ({MODEL}): {n_parts} {unit}"
@@ -545,7 +472,7 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
             max_output_tokens=max_output_tokens,
             thinking_config=types.ThinkingConfig(thinking_budget=0),
             response_mime_type="application/json",
-            response_schema=list[schema_model],
+            #response_schema=list[schema_model],
         ),
     )
 
@@ -571,14 +498,13 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         data = {"error": "parse_failed", "finish_reason": str(finish_reason), "raw": raw}
 
     output = {
-        "model":              MODEL,
-        "doi":                doi,
-        "input_format":       input_format,
-        "n_content_parts":    n_parts,
-        "supp_chars":         len(supp_text),
-        "figures_dir":        str(figures_dir),
-        "figure_classifications": classifications,
-        "records":            data,
+        "model":           MODEL,
+        "doi":             doi,
+        "input_format":    input_format,
+        "n_content_parts": n_parts,
+        "supp_chars":      len(supp_text),
+        "figures_dir":     str(figures_dir),
+        "records":         data,
     }
 
     with open(output_file, "w", encoding="utf-8") as f:
@@ -596,15 +522,6 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
             dbtt = record.get("DBTT_K", "null")
             gs_l = record.get("grain_size_L_um", "null")
             print(f"  {rid:10s}  {mat:20s}  DBTT={dbtt}K  grain_L={gs_l}µm")
-
-    if classifications:
-        print(f"\n── FIGURE CLASSIFICATION ──")
-        for item in classifications:
-            fid   = item.get("figure_id", "?")
-            ftype = item.get("figure_type", "?")
-            desc  = item.get("description", "")
-            data_flag = "[DATA]" if item.get("contains_data") else ""
-            print(f"  {fid:8s}  {ftype:18s}  {data_flag:6s}  {desc[:60]}")
 
     return len(data) if isinstance(data, list) else 0
 
