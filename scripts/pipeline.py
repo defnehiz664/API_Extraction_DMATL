@@ -16,9 +16,8 @@ value whenever the pipeline could compute one, falling back to whatever
 was already there otherwise. No _gemini/_mendeleev suffixed audit
 columns are kept in the output — only the authoritative unsuffixed name.
 
-Records containing Ni, Co, or Cu are flagged dataset_scope_flag =
-"W_heavy_alloy_no_DBTT" (out-of-scope heavy-alloy systems) and are not
-queried against Materials Project.
+Every record is queried against Materials Project; no composition is
+filtered, flagged, or skipped.
 
 Output:
   data/features_output.csv   — one row per record, original fields +
@@ -41,7 +40,7 @@ import pandas as pd
 from composition_builder import build_composition
 from element_table import build_element_table
 from mendeleev_features import compute_mendeleev_features
-from mp_features import compute_mp_features, skipped_mp_features
+from mp_features import compute_mp_features
 #from usfe_features import compute_usfe_features
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -64,15 +63,6 @@ OVERWRITE_FROM_MENDELEEV = {
     "delta_atomic_size": "delta_atomic_size_mendeleev",
     "delta_H_mix_kJ_mol": "delta_H_mix_kJ_mol_mendeleev",
 }
-
-# Records containing any of these elements are tungsten heavy-alloy
-# (liquid-phase-sintered W-Ni-Fe/Co/Cu) systems — structurally unrelated
-# to the W-DBTT dataset (no DBTT reported, different processing route).
-# They're flagged rather than dropped, and skipped for MP queries since
-# their elastic/thermo data isn't useful for the DBTT model and querying
-# every W-Ni-Fe-Co-Cu combination isn't worth the effort.
-HEAVY_ALLOY_INDICATOR_ELEMENTS = {"Ni", "Co", "Cu"}
-HEAVY_ALLOY_SCOPE_FLAG = "W_heavy_alloy_no_DBTT"
 
 
 def load_all_records(outputs_dir: Path) -> list:
@@ -147,11 +137,6 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Pat
         for w in comp["warnings"]:
             log_lines.append(f"  WARNING: {w}")
 
-        is_heavy_alloy = bool(HEAVY_ALLOY_INDICATOR_ELEMENTS & set(fractions.keys()))
-        row["dataset_scope_flag"] = HEAVY_ALLOY_SCOPE_FLAG if is_heavy_alloy else None
-        if is_heavy_alloy:
-            log_lines.append(f"  dataset_scope_flag: {HEAVY_ALLOY_SCOPE_FLAG} (contains {HEAVY_ALLOY_INDICATOR_ELEMENTS & set(fractions.keys())})")
-
         try:
             sub_table = element_table.loc[list(fractions.keys())]
             mendeleev_feats = compute_mendeleev_features(fractions, sub_table)
@@ -179,29 +164,23 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Pat
             mendeleev_feats = {}
 
         try:
-            if is_heavy_alloy:
-                mp_feats = skipped_mp_features(
-                    f"skipped — {HEAVY_ALLOY_SCOPE_FLAG}: out of DBTT dataset scope, not worth an MP query"
-                )
-                row.update(mp_feats)
+            mp_feats = compute_mp_features(fractions)
+            row.update(mp_feats)
+            if mp_feats.get("mp_query_skipped"):
                 log_lines.append(f"  mp features skipped: {mp_feats['mp_query_skipped']}")
             else:
-                mp_feats = compute_mp_features(fractions)
-                row.update(mp_feats)
-                if mp_feats.get("mp_query_skipped"):
-                    log_lines.append(f"  mp features skipped: {mp_feats['mp_query_skipped']}")
-                else:
-                    log_lines.append(f"  mp features: OK (material_id={mp_feats.get('mp_material_id')}, all_phases_found={mp_feats.get('mp_all_phases_found')})")
+                log_lines.append(f"  mp features: OK (material_id={mp_feats.get('mp_material_id')}, all_phases_found={mp_feats.get('mp_all_phases_found')})")
         except Exception as e:
             log_lines.append(f"  mp features FAILED: {e}")
             mp_feats = {}
 
-            #try:
-            #usfe_feats = compute_usfe_features(fractions, mp_features=mp_feats, mendeleev_features=mendeleev_feats)
-            #row.update(usfe_feats)
-            #log_lines.append(f"  usfe features: OK ({usfe_feats['usfe_approximation_note']})")
-        #except Exception as e:
-            #log_lines.append(f"  usfe features FAILED: {e}")
+        # Track C (usfe) not yet enabled:
+        # try:
+        #     usfe_feats = compute_usfe_features(fractions, mp_features=mp_feats, mendeleev_features=mendeleev_feats)
+        #     row.update(usfe_feats)
+        #     log_lines.append(f"  usfe features: OK ({usfe_feats['usfe_approximation_note']})")
+        # except Exception as e:
+        #     log_lines.append(f"  usfe features FAILED: {e}")
 
         rows.append(row)
 
@@ -217,7 +196,7 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Pat
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Feature enrichment pipeline for extracted W-DBTT records")
+    parser = argparse.ArgumentParser(description="Feature enrichment pipeline for extracted records")
     parser.add_argument("--outputs-dir", default=str(DEFAULT_OUTPUTS_DIR))
     parser.add_argument("--out", default=str(DEFAULT_CSV_OUT))
     parser.add_argument("--excel", default=str(DEFAULT_XLSX_OUT))

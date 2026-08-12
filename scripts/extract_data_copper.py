@@ -85,7 +85,7 @@ PAPERS_DIR   = PROJECT_ROOT / "data" / "papers"
 OUTPUT_DIR   = PROJECT_ROOT / "data" / "outputs"
 FIGURES_DIR  = PROJECT_ROOT / "data" / "figures"
 
-PDF_DPI = 200
+PDF_DPI = 400
 
 FIGURE_TYPES = [
     "microstructure",          # optical/SEM/TEM images of grain structure, porosity, precipitates, inclusions
