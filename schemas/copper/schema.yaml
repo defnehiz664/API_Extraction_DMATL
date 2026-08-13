@@ -261,14 +261,23 @@ domain_rules: |
     author's wording. Record the printed symbol verbatim in symbol_as_printed and the
     normalized meaning in parameter_meaning.
   - "Coffin-Manson" == "Manson-Coffin"; name order is not meaningful.
-  - Synonyms -> parameter_meaning:
-      fatigue_strength_coefficient    : sigma_f', σ'f, σF' , stress-life prefactor (unit MPa)
-      fatigue_strength_exponent       : b, "Basquin exponent" (dimensionless, usually negative)
-      fatigue_ductility_coefficient   : eps_f', ε'f (dimensionless)
-      fatigue_ductility_exponent      : c (dimensionless, usually negative)
-      cyclic_strength_coefficient     : K' (unit MPa)
-      cyclic_strain_hardening_exponent: n' (dimensionless)
-      transition_fatigue_life         : 2Nt, Nt, "transition life"
+  - Synonyms -> parameter_meaning. DECIDE BY THE DIMENSION OF THE VALUE, not by the symbol or the word "elastic":
+      fatigue_strength_coefficient     : elastic-line prefactor expressed as a STRESS (MPa) —
+                                         sigma_f', σ'f, σF'. Use ONLY when the value carries a stress unit (MPa).
+      elastic_strain_line_coefficient  : elastic-line prefactor expressed as a STRAIN (dimensionless or %) —
+                                         Ke, A_e. Relates to sigma_f' through Young's modulus (Ke ≈ sigma_f'/E).
+                                         Use this whenever the value is a strain (%/dimensionless), even if the
+                                         paper calls it an "elastic coefficient". NEVER put a %/dimensionless
+                                         value into the MPa field.
+      fatigue_strength_exponent        : elastic-line exponent — b, Ce, "Basquin exponent"
+                                         (dimensionless, usually negative). b and Ce are the SAME exponent.
+      fatigue_ductility_coefficient    : plastic-line prefactor, ALWAYS a strain — eps_f', ε'f, Kp.
+      fatigue_ductility_exponent       : plastic-line exponent — c, Cp (dimensionless, usually negative).
+      cyclic_strength_coefficient      : K' (unit MPa).
+      cyclic_strain_hardening_exponent : n' (dimensionless).
+      transition_fatigue_life          : 2Nt, Nt, "transition life".
+    Rule of thumb: an elastic-line coefficient in MPa is fatigue_strength_coefficient; the same coefficient
+    in % or dimensionless is elastic_strain_line_coefficient.
     If a symbol/name is not listed, STILL extract it: parameter_meaning=other, and put the
     printed symbol and the author's own definition verbatim in symbol_as_printed and notes.
 
@@ -286,14 +295,15 @@ domain_rules: |
   - strain_measure / stress_measure : amplitude (Δε/2) vs full range (Δε).
     Record exactly as the paper states. NEVER silently convert; conversion is a pipeline job.
 
-  D. FIT DOMAIN / TRANSITION. The flat result fields (eps_f', c, sigma_f', b, K', n', 2Nt) hold ONLY the full-range total
-  fit on a reversals + amplitude basis. Any coefficient that is regime-restricted (elastic-only,
-  plastic-only, below/above transition), on a different life/strain basis, or from a non-standard
-  or renamed framework goes into additional_parameters, never into the flat fields. Two fits for
-  two ranges = the full-range one in the flat fields + the other(s) in additional_parameters.
-  If a paper reports ONLY a regime-restricted or alternate-basis fit and no full-range total fit,
-  leave the flat fields null and record what exists in additional_parameters — do not force a
-  partial fit into the flat fields.
+  D. FIT REGIME. The Coffin-Manson-Basquin coefficients are inherently branch-specific and belong in the flat fields:
+   - fatigue_strength_coefficient (σf') and fatigue_strength_exponent (b) = the ELASTIC (Basquin) line.
+   - fatigue_ductility_coefficient (εf') and fatigue_ductility_exponent (c) = the PLASTIC (Coffin-Manson) line.
+   fit_regime=elastic for σf'/b and fit_regime=plastic for εf'/c is EXPECTED. These, plus cyclic K'/n'
+   and the transition life, go in the FLAT result fields regardless of branch. Record the reported basis
+   in conditions.life_basis/strain_measure; do NOT divert to additional_parameters just because the basis
+   is cycles/range rather than reversals/amplitude.
+   additional_parameters is ONLY for: (a) an EXTRA fit over a restricted range reported alongside the main
+   one (e.g. a separate below-transition fit), and (b) non-CMB frameworks (Pseudo-Wohler, Golos-Ellyn/energy).
 
   E. WHERE TO READ — table/equation beats plot.
   - If a value is TABULATED or stated in an EQUATION, take it from there exactly. Do NOT
@@ -725,6 +735,8 @@ tests:
       - {name: cyclic_strength_coefficient_K_prime_MPa, type: float, unit: MPa, description: "Cyclic strength coefficient K'"}
       - {name: cyclic_strain_hardening_exponent_n_prime, type: float, description: "Cyclic strain-hardening exponent n'"}
       - {name: transition_fatigue_life_2Nt, type: float, description: "Transition reversals (elastic = plastic), if reported"}
+      - {name: elastic_strain_line_coefficient, type: float, description: "Strain-based elastic-line coefficient Ke in de_e/2 = Ke*N^Ce (dimensionless or %, NOT sigma_f'; Ke = sigma_f'/E)."}
+      - {name: elastic_strain_line_exponent, type: float, description: "Strain-based elastic-line exponent Ce (usually negative)."}
       - name: data_points
         item_fields:
         - {name: total_strain_amplitude_pct, type: float, unit: "%"}
