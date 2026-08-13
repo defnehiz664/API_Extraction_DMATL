@@ -129,7 +129,10 @@ GENERAL:
   from supplementary tables and figures
 - Each material/specimen gets its own JSON object
 - Use null for values not reported — never guess or invent values
-- For numeric fields return only the number, never include units in the value
+- Tabular values: a "=== TABLES ===" block gives each table with rows and columns intact.
+  Read every tabular value from there, matching each number to its row and column header.
+  It is authoritative over the running body text, where table cells are flattened and out
+  of order. Cite the table's label in source_figure_or_table.
 - - Flag ALL uncertainties, methodology notes, and caveats in the notes field
   using [tag] format: [methodology] [fit_parameter] [grain_size_methodology]
   [surrogate] [graph_read] [derived] [scope_caveat] [finding]
@@ -457,6 +460,7 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
 
     # ── Step 1: Detect input and get content ──────────────────────────────────
     body_text    = ""
+    tables_md    = ""
     input_format = None
     content_parts: list[tuple[str, bytes, str]] = []
 
@@ -480,7 +484,9 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         input_format = "xml"
         print(f"Input: XML ({xml_path.name})")
         body_text, content_parts = get_xml_content(xml_path)
+        tables_md = extract_xml_tables(xml_path)
         print(f"  Body text: {len(body_text):,} characters")
+        print(f"  Tables parsed: {tables_md.count('###')}")
 
     elif pdf_path.exists():
         input_format = "pdf"
@@ -528,6 +534,11 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     contents = [build_extraction_prompt(doi, schema_config)]
     if body_text:
         contents.append(f"\n\n=== PAPER BODY TEXT ===\n{body_text}\n=== END BODY TEXT ===")
+    if tables_md:
+        contents.append(
+            "\n\n=== TABLES (structured; authoritative for tabular numbers) ===\n"
+            + tables_md + "\n=== END TABLES ==="
+        )
     if supp_text:
         contents.append(supp_text)
     for label, img_bytes, mime in content_parts:
