@@ -4670,6 +4670,7 @@ class Document:
             use_objstms=1,
             compression_effort=0,
             raise_on_repair=False,
+            reproducible=False,
             ):
         '''
         Save PDF using some different defaults
@@ -4695,6 +4696,7 @@ class Document:
                 use_objstms=use_objstms,
                 compression_effort=compression_effort,
                 raise_on_repair=raise_on_repair,
+                reproducible=reproducible,
                 )
 
     def find_bookmark(self, bm):
@@ -4967,11 +4969,8 @@ class Document:
                         o = mupdf.pdf_array_get( intent, j)
                         if mupdf.pdf_is_name( o):
                             intents.append( mupdf.pdf_to_name( o))
-            if mupdf_version_tuple >= (1, 26, 11):
-                resource_stack = mupdf.PdfResourceStack()
-                hidden = mupdf.pdf_is_ocg_hidden( pdf, resource_stack, usage, ocg)
-            else:
-                hidden = mupdf.pdf_is_ocg_hidden( pdf, mupdf.PdfObj(), usage, ocg)
+            resource_stack = mupdf.PdfResourceStack()
+            hidden = mupdf.pdf_is_ocg_hidden( pdf, resource_stack, usage, ocg)
             item = {
                     "name": name,
                     "intent": intents,
@@ -6398,8 +6397,8 @@ class Document:
             else:  # if all fails return the empty template
                 return templ_dict
 
-            # replace PDF "null" by zero, omit the square brackets
-            array = array.replace("null", "0")[1:-1]
+            # Omit the square brackets around a destination array.
+            array = array[1:-1]
 
             # find stuff before first "/"
             idx = array.find("/")
@@ -6410,28 +6409,100 @@ class Document:
             subval = array[:idx].strip()  # stuff before "/"
             array = array[idx:]  # stuff from "/" onwards
             templ_dict["dest"] = array
-            # if we start with /XYZ: extract x, y, zoom
-            # 1, 2 or 3 of these values may actually be supplied
-            if array.startswith("/XYZ"):
-                del templ_dict["dest"]  # don't return orig string in this case
-
-                # make a list of the 3 tokens following "/XYZ"
-                array_list = array.split()[1:4]  # omit "/XYZ"
-
-                # fill up missing tokens with "0" strings
-                while len(array_list) < 3:  # fill up if too short
-                    array_list.append("0")  # add missing values
-
-                # make list of 3 floats: x, y and zoom
-                t = list(map(float, array_list))  # the resulting x, y, z values
-                templ_dict["to"] = (t[0], t[1])
-                templ_dict["zoom"] = t[2]
 
             # extract page number
             if subval.endswith("0 R"):  # page xref given?
-                templ_dict["page"] = page_xrefs.get(int(subval.split()[0]),-1)
+                try:
+                    templ_dict["page"] = page_xrefs.get(int(subval.split()[0]), -1)
+                except Exception:
+                    templ_dict["page"] = -1
             else:  # naked page number given
-                templ_dict["page"] = int(subval)
+                try:
+                    templ_dict["page"] = int(subval)
+                except Exception:
+                    templ_dict["page"] = -1
+
+            # destination details are only meaningful with a valid page
+            pno = templ_dict["page"]
+            if pno < 0:
+                return templ_dict
+
+            try:
+                page_rect = self[pno].rect
+            except Exception:
+                return templ_dict
+
+            def as_float(token):
+                if token is None:
+                    return None
+                token = token.strip('[]')
+                if token.lower() == "null":
+                    return None
+                return float(token)
+
+            def to_fitz_x(pdf_x):
+                if pdf_x is None:
+                    return None
+                return pdf_x - page_rect.x0
+
+            def to_fitz_y(pdf_y):
+                if pdf_y is None:
+                    return None
+                return pdf_y - page_rect.y0
+
+            parts = [p.strip('[]') for p in array.split()]
+            if not parts:
+                return templ_dict
+
+            mode = parts[0]
+            mode = ''.join(ch for ch in mode if ch.isalpha() or ch == '/')
+            args = parts[1:]
+
+            if mode == "/XYZ":
+                del templ_dict["dest"]
+                left = as_float(args[0]) if len(args) > 0 else None
+                top = as_float(args[1]) if len(args) > 1 else None
+                zoom = as_float(args[2]) if len(args) > 2 else None
+
+                x = to_fitz_x(left)
+                y = to_fitz_y(top)
+                templ_dict["to"] = (
+                    x if x is not None else 0.0,
+                    y if y is not None else 0.0,
+                )
+                templ_dict["zoom"] = zoom if zoom is not None else 0.0
+
+            elif mode in ("/Fit", "/FitB"):
+                del templ_dict["dest"]
+                templ_dict["to"] = (0.0, 0.0)
+                templ_dict["zoom"] = 0.0
+
+            elif mode in ("/FitH", "/FitBH"):   # codespell:ignore
+                del templ_dict["dest"]
+                top = as_float(args[0]) if len(args) > 0 else None
+                y = to_fitz_y(top)
+                templ_dict["to"] = (0.0, y if y is not None else 0.0)
+                templ_dict["zoom"] = 0.0
+
+            elif mode in ("/FitV", "/FitBV"):
+                del templ_dict["dest"]
+                left = as_float(args[0]) if len(args) > 0 else None
+                x = to_fitz_x(left)
+                templ_dict["to"] = (x if x is not None else 0.0, 0.0)
+                templ_dict["zoom"] = 0.0
+
+            elif mode == "/FitR" and len(args) >= 4:
+                del templ_dict["dest"]
+                left = as_float(args[0])
+                top = as_float(args[3])
+                x = to_fitz_x(left)
+                y = to_fitz_y(top)
+                templ_dict["to"] = (
+                    x if x is not None else 0.0,
+                    y if y is not None else 0.0,
+                )
+                templ_dict["zoom"] = 0.0
+
             return templ_dict
 
         def fill_dict(dest_dict, pdf_dict):
@@ -6502,6 +6573,7 @@ class Document:
             use_objstms=0,
             compression_effort=0,
             raise_on_repair=False,
+            reproducible=False,
             ):
         # From %pythonprepend save
         #
@@ -6551,6 +6623,7 @@ class Document:
         opts.do_appearance = appearance
         opts.do_encrypt = encryption
         opts.permissions = permissions
+        opts.reproducible = reproducible
         if owner_pw is not None:
             opts.opwd_utf8_set_value(owner_pw)
         elif user_pw is not None:
@@ -6604,70 +6677,71 @@ class Document:
     # Acrobat 'sanitize' function
     # ------------------------------------------------------------------------------
     def scrub(
-            doc: 'Document',
-            attached_files: bool = True,
-            clean_pages: bool = True,
-            embedded_files: bool = True,
-            hidden_text: bool = True,
-            javascript: bool = True,
-            metadata: bool = True,
-            redactions: bool = True,
-            redact_images: int = 0,
-            remove_links: bool = True,
-            reset_fields: bool = True,
-            reset_responses: bool = True,
-            thumbnails: bool = True,
-            xml_metadata: bool = True,
-            ) -> None:
-        
-        def remove_hidden(cont_lines):
-            """Remove hidden text from a PDF page.
+        doc: "Document",
+        attached_files: bool = True,
+        clean_pages: bool = True,
+        embedded_files: bool = True,
+        hidden_text: bool = True,
+        javascript: bool = True,
+        metadata: bool = True,
+        redactions: bool = True,
+        redact_images: int = 0,
+        remove_links: bool = True,
+        reset_fields: bool = True,
+        reset_responses: bool = True,
+        thumbnails: bool = True,
+        xml_metadata: bool = True,
+    ) -> None:
 
-            Args:
-                cont_lines: list of lines with /Contents content. Should have status
-                    from after page.cleanContents().
+        def add_hidden_text_redactions(page):
+            """Add redaction annots for hidden text spans and return their count."""
+            filled_flag = getattr(mupdf, "FZ_STEXT_FILLED", None)
+            stroked_flag = getattr(mupdf, "FZ_STEXT_STROKED", None)
 
-            Returns:
-                List of /Contents lines from which hidden text has been removed.
+            def is_hidden_span(span):
+                font = span.get(dictkey_font) or span.get("font")
+                if isinstance(font, str):
+                    # Account for subset prefixes like "ABCDEE+GlyphLessFont".
+                    if font.split("+")[-1] == "GlyphLessFont":
+                        return True
 
-            Notes:
-                The input must have been created after the page's /Contents object(s)
-                have been cleaned with page.cleanContents(). This ensures a standard
-                formatting: one command per line, single spaces between operators.
-                This allows for drastic simplification of this code.
-            """
-            out_lines = []  # will return this
-            in_text = False  # indicate if within BT/ET object
-            suppress = False  # indicate text suppression active
-            make_return = False
-            for line in cont_lines:
-                if line == b"BT":  # start of text object
-                    in_text = True  # switch on
-                    out_lines.append(line)  # output it
+                alpha = span.get("alpha")
+                if alpha == 0:
+                    return True
+
+                char_flags = span.get(dictkey_char_flags)
+                if (
+                    isinstance(char_flags, int)
+                    and isinstance(filled_flag, int)
+                    and isinstance(stroked_flag, int)
+                ):
+                    filled = bool(char_flags & filled_flag)
+                    stroked = bool(char_flags & stroked_flag)
+                    if not filled and not stroked:
+                        return True
+
+                return False
+
+            count = 0
+            textpage = page.get_text(
+                "dict", flags=TEXT_PRESERVE_SPANS | TEXT_COLLECT_STYLES
+            )
+            for block in textpage.get("blocks", ()):
+                if block.get("type") != 0:
                     continue
-                if line == b"ET":  # end of text object
-                    in_text = False  # switch off
-                    out_lines.append(line)  # output it
-                    continue
-                if line == b"3 Tr":  # text suppression operator
-                    suppress = True  # switch on
-                    make_return = True
-                    continue
-                if line[-2:] == b"Tr" and line[0] != b"3":
-                    suppress = False  # text rendering changed
-                    out_lines.append(line)
-                    continue
-                if line == b"Q":  # unstack command also switches off
-                    suppress = False
-                    out_lines.append(line)
-                    continue
-                if suppress and in_text:  # suppress hidden lines
-                    continue
-                out_lines.append(line)
-            if make_return:
-                return out_lines
-            else:
-                return None
+                for line in block.get("lines", ()):
+                    for span in line.get(dictkey_spans, ()):
+                        if not is_hidden_span(span):
+                            continue
+                        bbox = span.get(dictkey_bbox) or span.get("bbox")
+                        if not bbox:
+                            continue
+                        rect = Rect(bbox)
+                        if rect.is_empty or rect.is_infinite:
+                            continue
+                        page.add_redact_annot(rect, cross_out=False)
+                        count += 1
+            return count
 
         if not doc.is_pdf:  # only works for PDF
             raise ValueError("is no PDF")
@@ -6675,7 +6749,6 @@ class Document:
             raise ValueError("closed or encrypted doc")
 
         if not clean_pages:
-            hidden_text = False
             redactions = False
 
         if metadata:
@@ -6692,7 +6765,11 @@ class Document:
                 for link in links:  # remove all links
                     page.delete_link(link)
 
-            found_redacts = False
+            hidden_redacts = 0
+            if hidden_text:
+                hidden_redacts = add_hidden_text_redactions(page)
+
+            found_redacts = bool(hidden_redacts)
             for annot in page.annots():
                 if annot.type[0] == mupdf.PDF_ANNOT_FILE_ATTACHMENT and attached_files:
                     annot.update_file(buffer_=b" ")  # set file content to empty
@@ -6701,24 +6778,11 @@ class Document:
                 if annot.type[0] == mupdf.PDF_ANNOT_REDACT:  # pylint: disable=no-member
                     found_redacts = True
 
-            if redactions and found_redacts:
+            if hidden_redacts or (redactions and found_redacts):
                 page.apply_redactions(images=redact_images)
 
-            if not (clean_pages or hidden_text):
-                continue  # done with the page
-
-            page.clean_contents()
-            if not page.get_contents():
-                continue
-            if hidden_text:
-                xrefs = page.get_contents()
-                assert len(xrefs) == 1  # only one because of cleaning.
-                xref = xrefs[0]
-                cont = doc.xref_stream(xref)
-                cont_lines = remove_hidden(cont.splitlines())  # remove hidden text
-                if cont_lines:  # something was actually removed
-                    cont = b"\n".join(cont_lines)
-                    doc.update_stream(xref, cont)  # rewrite the page /Contents
+            if clean_pages:
+                page.clean_contents()
 
             if thumbnails:  # remove page thumbnails?
                 if doc.xref_get_key(page.xref, "Thumb")[0] != "null":
@@ -6757,7 +6821,7 @@ class Document:
 
             if doc.xref_get_key(xref, "Metadata")[0] != "null":
                 doc.xref_set_key(xref, "Metadata", "null")
-    
+
     def search_page_for(
             doc: 'Document',
             pno: int,
@@ -7881,6 +7945,7 @@ class Document:
             use_objstms=0,
             compression_effort=0,
             raise_on_repair=False,
+            reproducible=False,
     ):
         from io import BytesIO
         bio = BytesIO()
@@ -7906,6 +7971,7 @@ class Document:
                 use_objstms=use_objstms,
                 compression_effort=compression_effort,
                 raise_on_repair=raise_on_repair,
+                reproducible=reproducible,
         )
         return bio.getvalue()
     
@@ -8958,7 +9024,9 @@ class linkDest:
         self.uri = obj.uri
         
         def uri_to_dict(uri):
-            items = self.uri[1:].split('&')
+            if uri.startswith('#'):
+                uri = uri[1:]
+            items = uri.split('&')
             ret = dict()
             for item in items:
                 eq = item.find('=')
@@ -8978,7 +9046,76 @@ class linkDest:
                 newname += chr(int(piece, base=16))
                 newname += item[2:]
             return newname
-        
+
+        def as_float(text):
+            if text is None:
+                return None
+            text = text.strip()
+            if not text:
+                return None
+            if text.lower() in ("null", "nan"):
+                return None
+            try:
+                return float(text)
+            except Exception:
+                if g_exceptions_verbose:
+                    exception_info()
+                return None
+
+        def apply_view(view):
+            if not view:
+                return False
+            items = [i.strip() for i in view.split(",")]
+            if not items:
+                return False
+            mode = items[0]
+            if not mode:
+                return False
+            if mode[0] != "/":
+                mode = f"/{mode}"
+            args = items[1:]
+
+            if mode in ("/Fit", "/FitB"):
+                self.lt = Point(0, 0)
+                return True
+
+            if mode in ("/FitH", "/FitBH"): # codespell:ignore
+                top = as_float(args[0]) if len(args) >= 1 else None
+                if top is not None:
+                    self.lt = Point(0, top)
+                    self.flags = self.flags | LINK_FLAG_T_VALID
+                return True
+
+            if mode in ("/FitV", "/FitBV"):
+                left = as_float(args[0]) if len(args) >= 1 else None
+                if left is not None:
+                    self.lt = Point(left, 0)
+                    self.flags = self.flags | LINK_FLAG_L_VALID
+                return True
+
+            if mode == "/FitR":
+                if len(args) >= 4:
+                    left = as_float(args[0])
+                    top = as_float(args[3])
+                    if left is not None and top is not None:
+                        self.lt = Point(left, top)
+                        self.flags = self.flags | LINK_FLAG_L_VALID | LINK_FLAG_T_VALID
+                        return True
+                return False
+
+            if mode == "/XYZ":
+                left = as_float(args[0]) if len(args) >= 1 else None
+                top = as_float(args[1]) if len(args) >= 2 else None
+                if left is not None:
+                    self.lt.x = left
+                    self.flags = self.flags | LINK_FLAG_L_VALID
+                if top is not None:
+                    self.lt.y = top
+                    self.flags = self.flags | LINK_FLAG_T_VALID
+                return True
+
+            return False
+
         if rlink and not self.uri.startswith("#"):
             self.uri = f"#page={rlink[0] + 1}&zoom=0,{_format_g(rlink[1])},{_format_g(rlink[2])}"
         if obj.is_external:
@@ -8991,29 +9128,38 @@ class linkDest:
             self.uri = self.uri.replace("&zoom=nan", "&zoom=0")
             if self.uri.startswith("#"):
                 self.kind = LINK_GOTO
-                m = re.match('^#page=([0-9]+)&zoom=([0-9.]+),(-?[0-9.]+),(-?[0-9.]+)$', self.uri)
-                if m:
-                    self.page = int(m.group(1)) - 1
-                    self.lt = Point(float((m.group(3))), float(m.group(4)))
-                    self.flags = self.flags | LINK_FLAG_L_VALID | LINK_FLAG_T_VALID
+                params = uri_to_dict(self.uri)
+                page_arg = params.get('page')
+                if page_arg is not None and page_arg.isdigit():
+                    self.page = int(page_arg) - 1
+                    have_location = False
+                    zoom = params.get('zoom')
+                    if zoom:
+                        zoom_items = zoom.split(',')
+                        if len(zoom_items) >= 3:
+                            try:
+                                self.lt = Point(float(zoom_items[1]), float(zoom_items[2]))
+                                self.flags = self.flags | LINK_FLAG_L_VALID | LINK_FLAG_T_VALID
+                                have_location = True
+                            except Exception:
+                                if g_exceptions_verbose:
+                                    exception_info()
+                    if not have_location:
+                        apply_view(params.get('view'))
                 else:
-                    m = re.match('^#page=([0-9]+)$', self.uri)
-                    if m:
-                        self.page = int(m.group(1)) - 1
+                    self.kind = LINK_NAMED
+                    m = re.match('^#nameddest=(.*)', self.uri)
+                    assert document
+                    if document and m:
+                        named = unescape(m.group(1))
+                        self.named = document.resolve_names().get(named)
+                        if self.named is None:
+                            # document.resolve_names() does not contain an
+                            # entry for `named` so use an empty dict.
+                            self.named = dict()
+                        self.named['nameddest'] = named
                     else:
-                        self.kind = LINK_NAMED
-                        m = re.match('^#nameddest=(.*)', self.uri)
-                        assert document
-                        if document and m:
-                            named = unescape(m.group(1))
-                            self.named = document.resolve_names().get(named)
-                            if self.named is None:
-                                # document.resolve_names() does not contain an
-                                # entry for `named` so use an empty dict.
-                                self.named = dict()
-                            self.named['nameddest'] = named
-                        else:
-                            self.named = uri_to_dict(self.uri[1:])
+                        self.named = uri_to_dict(self.uri)
             else:
                 self.kind = LINK_NAMED
                 self.named = uri_to_dict(self.uri)
@@ -10830,7 +10976,8 @@ class Page:
         clip = Rect(rect)
         if clip.is_infinite or (clip & self.rect).is_empty:
             raise ValueError("rect must not be infinite or empty")
-        clip *= self.transformation_matrix
+        if mupdf_version_tuple < (1, 28, 1):
+            clip *= self.transformation_matrix
         pdfpage = _as_pdf_page(self)
         pclip = JM_rect_from_py(clip)
         mupdf.pdf_clip_page(pdfpage, pclip)
@@ -19834,7 +19981,10 @@ def JM_get_font(
     
     # Check for NOTO font
     #have_noto:;
-    data, size, index = mupdf.fz_lookup_noto_font( script, lang)
+    if mupdf_version_tuple >= (1, 29):
+        data, size, index, attr, noto_index = mupdf.fz_lookup_noto_font(script, lang)
+    else:
+        data, size, index = mupdf.fz_lookup_noto_font(script, lang)
     font = None
     if data:
         font = mupdf.fz_new_font_from_memory( None, data, size, index, 0)

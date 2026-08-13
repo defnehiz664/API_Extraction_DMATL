@@ -22,7 +22,8 @@ record_id_prefix: "Cu"
 domain_rules: |
   GLOBAL EXTRACTION GUARD (applies to every field):
   - Extract ONLY values explicitly stated in, or directly read from, the paper.
-    Never infer, estimate, or fill a value from typical/textbook knowledge.
+    Never infer, estimate, or fill a value from typical/textbook knowledge. 
+    Never calculate a value from other fields unless explicitly marked CALCULATE.
   - Leave a field null if the paper does not provide it.
   - The ONLY fields you may compute are those marked CALCULATE, and only from
     other fields you extracted in THIS record: composition_string,
@@ -51,6 +52,8 @@ domain_rules: |
   - Ordering rule: primary_addition_element is the intentional addition at the HIGHEST
     concentration; secondary_addition_element is the next highest. If the paper mixes
     wt% and at%, compare on the same basis before deciding the order.
+    If the paper does not explicitly state exact chemical composition or concentration, 
+    do not use the vendor website to see the actual values, do not take the average of the typical concentration range from standards.
   - Element slots (primary / secondary / other) take element SYMBOLS only. Dispersoid
     compounds (Al2O3, Y2O3) go in dispersoid_phase; ODS content is often in vol%.
   - primary_addition_unit and secondary_addition_unit are each exactly one of: ppm / wt% / at%.
@@ -72,32 +75,73 @@ domain_rules: |
     the feature pipeline from the composition fields you extracted. Do not compute them here.
 
   PROCESSING:
-  - deformation_process (REQUIRED) — exactly one of: none / cold_rolling / hot_rolling /
-    warm_rolling / rotary_swaging / drawing / extrusion / forging / ECAP / HPT /
-    spark_plasma_sintering / sintering / other. "none" = no deformation (as-cast or only heat-treated).
+  # --- WHAT deformation: split across three axes so temperature never collides with operation ---
+  - deformation_mode (REQUIRED) — the generic operation, exactly one of:
+    none / rolling / forging / extrusion / drawing / swaging / compression / torsion / other.
+    "none" = no deformation (as-cast, consolidation-only, or heat-treated only).
+    Never put a temperature word here; hot/cold/warm is deformation_temperature_regime.
+
+  - deformation_technique — the specific named process under the mode, else null. One of:
+    rotary_swaging / ECAP / HPT / ARB / dynamic_plastic_deformation /
+    multidirectional_forging / twist_extrusion / other.
+    Null when no named technique applies (plain rolling, forging, drawing, etc.).
+    Use a technique ONLY when the process has a defining geometry or route beyond mode+temperature.
+    Decomposition rule:
+      * cryorolling    -> mode=rolling,    regime=cryogenic, technique=conventional
+      * ECAP           -> mode=extrusion,  technique=ECAP   (angular-channel shear ≠ mode+temp)
+      * ARB            -> mode=rolling,     technique=ARB
+      * rotary swaging -> mode=swaging,     technique=rotary_swaging
+
+  - deformation_temperature_regime — exactly one of: cryogenic / cold / warm / hot / not_specified.
+    Defined by recrystallization, NOT absolute value:
+      cryogenic = sub-ambient (e.g. liquid N2), recovery suppressed
+      cold      = below recrystallization, work hardening retained (Cu: ~<0.3 Tm)
+      warm      = intermediate, partial recovery
+      hot       = above recrystallization, dynamic recrystallization (Cu: ~>0.5 Tm, i.e. >~600C)
+    Tm(Cu) ~ 1358 K; thresholds are alloy-specific guides, not hard cutoffs.
+
+  - UMBRELLA-ONLY rule: if the paper names only an umbrella ("hot formed",
+    "thermomechanically processed") with no operation, set deformation_mode=other,
+    deformation_temperature_regime=hot (or as stated), deformation_technique=null,
+    and tag [processing_underspecified] in notes. Do NOT guess a specific operation —
+    do NOT record "forging" for "hot forming", since forging is one operation under
+    that umbrella, not a synonym for it.
+
+  - CONSOLIDATION is not deformation. sintering, spark_plasma_sintering, HIP, and casting
+    belong to processing_category (powder_metallurgy / as_cast), with their parameters in
+    processing_parameters. For an as-consolidated sample, deformation_mode=none.
+
+  # --- qualitative state ---
   - material_condition — exactly one of: as_cast / annealed / recrystallized / cold_worked /
-    solution_treated / solution_treated_and_aged / severe_plastic_deformation / other.
+    solution_treated / solution_treated_and_aged / other.
     Qualitative state only; the AMOUNT of cold work is equivalent_true_strain. Independent
     of strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
+
+  # --- the route and its parsed values ---
   - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
+    Do not average the temperatures or times — record the actual steps with the stated ranges.
     The fields below are the parsed values pulled out of it.
     Example: "solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h".
-  - equivalent_true_strain (CALCULATE if not stated directly): total imposed von Mises
-    EQUIVALENT true strain, comparable across all deformation modes.
+
+  - equivalent_true_strain (CALCULATE if not stated directly): total von Mises EQUIVALENT
+    true strain, comparable across all deformation modes.
       * rolling / drawing / swaging / extrusion: eps = ln(1/(1 - total_reduction)), reduction as a fraction (50% -> 0.50).
       * multi-pass: sum the per-pass strains, eps = n * ln(1/(1 - r_per_pass)).
       * ECAP: about 1.15 per pass for a 90-degree die (Iwahashi equation); total = n * per-pass.
       * HPT / other SPD: use the standard process formula and record the geometric inputs
         (turns, radius, thickness, die angle) in processing_parameters.
     Do NOT keep separate "logarithmic" and "cumulative" strains — this one field replaces both.
-  - total_reduction_pct: total thickness/area reduction as REPORTED, in % (the raw input to the strain).
+
+  - total_reduction_pct: total thickness/area reduction as REPORTED, in % (raw input to the strain).
   - number_of_passes: number of deformation passes/steps, if reported.
   - strain_rate_per_s: deformation strain rate in s^-1, if reported.
+
   - processing_parameters: process-SPECIFIC parameters not captured above, as key:value pairs
-    with units, per deformation_process. Free text; null if none.
+    with units, keyed to deformation_technique/mode. Free text; null if none.
     Examples — ECAP: "route=Bc; die_angle=90deg; back_pressure=0MPa";
     rotary_swaging: "per_pass_reduction=15%; die=4-jaw";
     spark_plasma_sintering: "pressure=50MPa; dwell=5min; heating_rate=100C/min".
+
   - deformation_temperature_K is a WORKING temperature and belongs to processing. TEST
     temperatures (tensile, LCF, etc.) are NOT processing — they live inside each test block.
 
@@ -112,7 +156,7 @@ domain_rules: |
   GRAIN SIZE:
   - grain_size_L_um = longitudinal/rolling (RD/LD); grain_size_T_um = transverse (TD);
     grain_size_S_um = short-transverse/normal (ND, thickness). Match the paper's x/y/z to
-    L/T/S from its stated rolling/forging geometry.
+    L/T/S from its stated rolling/forging geometry. If the paper states equiaxed, record the single value in L and T, leave S null.
   - grain_boundary_area_to_volume_per_um (CALCULATE) = 1/L + 1/T + 1/S from the grain sizes.
     Never null if L/T/S are known.
   - grain_size_estimated_dimensions — exactly one of: none / partial / x_y_estimated /
@@ -131,11 +175,146 @@ domain_rules: |
     loading / crack propagation and grain elongation, e.g. "along_L", "along_S", "L-T crack system".
 
   TESTS & CHARACTERIZATION:
-  - A test or characterization block is null unless that method was performed; fill a result
-    only if the paper reports it for THIS material-condition (the presence of the block is the
-    record that the test was run — there is no separate method field).
+  # --- existence: a value must be MEASURED, never manufactured ---
+  - A test or characterization block is null unless that method was actually performed on
+    THIS material-condition. The presence of the block is the record that the test was run;
+    there is no separate method field. If the paper does not report the test, the block stays null.
+
+  - ABSOLUTE ANTI-FABRICATION RULE. Record a property value ONLY if the paper directly reports
+    a MEASUREMENT of that property, by that method, for this material-condition. NEVER derive,
+    convert, infer, estimate, back-calculate, or otherwise manufacture a value for a property
+    that was not measured. An unmeasured property is null. It is never a filled-in guess, and a
+    property being *estimable* from other data is never a reason to fill it.
+
+  - NO CROSS-PROPERTY CONVERSION. A measured property must NEVER be used to populate a different,
+    unmeasured property. Explicitly forbidden (non-exhaustive):
+      * tensile strength -> Vickers / Brinell hardness (Tabor, ASTM E140 relations)  <-- the exact error to kill
+      * hardness -> yield or tensile strength
+      * resistivity <-> conductivity swapped to fill a field the paper did not report
+      * modulus, CTE, SFE, or any property taken from a handbook or a different alloy to fill this record
+    If the paper reports hardness, hardness is filled from that measurement. If it does not,
+    hardness is null. That HV is derivable from UTS is irrelevant and never permitted.
+
+  - SOURCE ANCHOR (enforcement). Every non-null measured property MUST have a
+    source_figure_or_table pointing to where that specific value was measured in THIS paper.
+    If you cannot cite the figure, table, or sentence that reports the measurement, the value
+    is null. No anchor, no value.
+
+  - Author-reported conversions. If the AUTHORS themselves present a value they state is
+    converted or estimated (not measured), leave the numeric property field null and record it
+    in notes as [author_reported_conversion] with the stated value and basis. A converted value
+    never goes into a measured-property field.
+
+  - Allowed calculations are ONLY the fields explicitly marked "CALCULATE" (equivalent_true_strain,
+    composition_string, grain_boundary_area). Those are geometric or compositional descriptors
+    computed from inputs you extracted. This exception NEVER extends to physical measured
+    properties (hardness, strength, modulus, resistivity, fatigue coefficients).
+
+  - graph_read is allowed and is NOT conversion. A value digitized off a plot in THIS paper is a
+    reported measurement; tag [graph_read]. Reading a datum off the paper's own figure is fine;
+    computing a datum the paper never showed is not.
+  OBSERVED-IN-THIS-WORK RULE (no extraction from background/introduction).
+
+  - Fill a field ONLY from what THIS paper observed, measured, or determined for THIS
+    material-condition in its own Methods, Results, or Discussion. Statements in the
+    Introduction, background, literature review, motivation, or abstract framing are NOT
+    observations of this material and must NEVER populate a field, even when stated as fact.
+  - Expectation / hedge language marks a non-observation — do not extract:
+    "is expected to", "should", "is known to", "typically", "generally", "likely",
+    "in order to", "aims to", "we anticipate", "reported in the literature".
+    These describe intent or prior work, not a result of this study.
+  - A claim supported only by a citation to another work is background, not this paper's
+    data, and does not populate a field. (This differs from data_from_reference, which is
+    the separate case where the authors explicitly REUSE another work's measured data.)
+  - SOURCE ANCHOR extends here: source_figure_or_table must point to Methods/Results/
+    Discussion. If the only support is in the Introduction or abstract, the field is null.
+  - Optional trace: if the paper only EXPECTS something it never observed, you may record it
+    in notes as [expected_not_observed] with the statement, but the field itself stays null.
+
+  # --- umbrella vs specific for methods and specimen prep (same principle as PROCESSING) ---
+  - Record every method as SPECIFICALLY as the paper states it. Do not substitute a specific
+    technique with its umbrella, and do not lose the specific term. Capture the specific named
+    technique; record the umbrella only if that is all the paper gives, and tag [method_underspecified].
+    Examples:
+      * "jet / twin-jet electropolishing" is specific under the electropolishing umbrella ->
+        record jet_electropolishing, NOT plain electropolishing.
+      * BIB and FIB are not generic "ion milling".
+      * SE, BSE, ECCI, EBSD are not generic "SEM".
+    This applies to specimen_preparation_method and to every *_method field alike.
+
+  - precipitate_coherency, and any structural attribute needing a specific probe, is filled
+    ONLY if the paper (a) ran a technique able to determine it — HRTEM lattice imaging or
+    diffraction/strain-contrast TEM for coherency, not plain SEM/EBSD — AND (b) reports that
+    determination for THIS material. An introduction saying coherent precipitates are
+    "expected" is not an observation; coherency stays null. Tag [structure_probe_absent] if
+    the enabling technique was not performed.
+
   - Microstructure quantities stay in the material layer; tag their source with the *_method
-    fields (grain_size_method, texture_method, phase_fraction_method, dislocation_density_method).
+    fields (grain_size_method, texture_method, phase_fraction_method, dislocation_density_method),
+    each recording the most specific technique named, per the rule above.
+
+  LOW-CYCLE FATIGUE (LCF) — PRIORITY SECTION. Capture ALL fatigue data broadly; when unsure
+  whether something is in scope, extract it and tag it, do not drop it.
+
+  A. CAPTURE BY MEANING, NOT SYMBOL (nomenclature invariance).
+  - Identify each parameter by its PHYSICAL ROLE in the equation, never by the symbol or the
+    author's wording. Record the printed symbol verbatim in symbol_as_printed and the
+    normalized meaning in parameter_meaning.
+  - "Coffin-Manson" == "Manson-Coffin"; name order is not meaningful.
+  - Synonyms -> parameter_meaning:
+      fatigue_strength_coefficient    : sigma_f', σ'f, σF' , stress-life prefactor (unit MPa)
+      fatigue_strength_exponent       : b, "Basquin exponent" (dimensionless, usually negative)
+      fatigue_ductility_coefficient   : eps_f', ε'f (dimensionless)
+      fatigue_ductility_exponent      : c (dimensionless, usually negative)
+      cyclic_strength_coefficient     : K' (unit MPa)
+      cyclic_strain_hardening_exponent: n' (dimensionless)
+      transition_fatigue_life         : 2Nt, Nt, "transition life"
+    If a symbol/name is not listed, STILL extract it: parameter_meaning=other, and put the
+    printed symbol and the author's own definition verbatim in symbol_as_printed and notes.
+
+    B. RECOGNIZE EQUATIONS BY FORM; do not omit non-standard frameworks.
+      Δεe/2 = (σf'/E)(2Nf)^b              -> basquin            (elastic regime)
+      Δεp/2 = εf'(2Nf)^c                  -> coffin_manson      (plastic regime)
+      Δε/2  = elastic term + plastic term -> coffin_manson_basquin (total)
+      stress amplitude vs life power law  -> pseudo_wohler
+      plastic/total strain-energy density vs life -> golos_ellyn (energy-based)
+      Δσ/2 = K'(Δεp/2)^n'                 -> cyclic_stress_strain (cyclic Ramberg-Osgood)
+    Any further named model: framework = name-as-printed, and capture its parameters the same way.
+
+  C. FACTOR-OF-TWO PROVENANCE (critical, silent-error source). For every value record BOTH:
+  - life_basis  : reversals_2Nf vs cycles_Nf (the life axis differs by a factor of 2).
+  - strain_measure / stress_measure : amplitude (Δε/2) vs full range (Δε).
+    Record exactly as the paper states. NEVER silently convert; conversion is a pipeline job.
+
+  D. FIT DOMAIN / TRANSITION. The flat result fields (eps_f', c, sigma_f', b, K', n', 2Nt) hold ONLY the full-range total
+  fit on a reversals + amplitude basis. Any coefficient that is regime-restricted (elastic-only,
+  plastic-only, below/above transition), on a different life/strain basis, or from a non-standard
+  or renamed framework goes into additional_parameters, never into the flat fields. Two fits for
+  two ranges = the full-range one in the flat fields + the other(s) in additional_parameters.
+  If a paper reports ONLY a regime-restricted or alternate-basis fit and no full-range total fit,
+  leave the flat fields null and record what exists in additional_parameters — do not force a
+  partial fit into the flat fields.
+
+  E. WHERE TO READ — table/equation beats plot.
+  - If a value is TABULATED or stated in an EQUATION, take it from there exactly. Do NOT
+    re-derive a tabulated coefficient by digitizing a plot.
+  - Digitize a plot ONLY for datapoints not otherwise reported. Before digitizing, name the
+    exact figure+subfigure in plot_source, read the axis labels, units, and scale (LCF plots
+    are usually log-log), and identify each series (elastic/plastic/total, or a strain range).
+    Tag every point [graph_read] with [high]/[low].
+  - If axes or series are unreadable, record fewer points or none and tag [graph_read][low].
+    NEVER invent points to complete a curve. Anti-fabrication and observed-in-this-work rules apply.
+
+  F. PLOT TYPES (plot_type vocabulary):
+    strain_life                     : strain amplitude vs reversals/cycles to failure
+                                      (Manson-Coffin diagram; elastic/plastic/total series) — PRIMARY
+    pseudo_wohler                   : stress amplitude vs life
+    energy_diagram                  : strain-energy density vs life (Golos-Ellyn)
+    cyclic_stress_response          : stress amplitude vs number of cycles, per strain range (hard/soft)
+    cyclic_plastic_strain_evolution : plastic strain amplitude vs number of cycles
+    monotonic_and_cyclic_ssc        : monotonic + cyclic stress-strain curves
+    hysteresis_loop                 : stress-strain loop at half-life (cyclic hardening/softening)
+    other
 
 # -----------------------------------------------------------------------------
 # MATERIAL LAYER  (flat scalar attributes; one record per material-condition)
@@ -207,18 +386,47 @@ fields:
       E.g. 'Cu1', 'Cu0.991Cr0.007Zr0.002'. Never null if composition is known."
 
   # ── PROCESSING ───────────────────────────────────────────────────────────────
-  - name: processing_history
-    type: str
-    description: "Full processing route, verbatim — the raw record the fields below are parsed from."
+
+  # ── Summary & audit (whole-route view; parsed fields below are pulled from these) ──
   - name: material_condition
     type: str
-    description: "Temper/condition — one of: as_cast / annealed / recrystallized / cold_worked /
-      solution_treated / solution_treated_and_aged / severe_plastic_deformation / other."
-  - name: deformation_process
+    description: "Qualitative end state — exactly one of: as_cast / annealed / recrystallized /
+      cold_worked / solution_treated / solution_treated_and_aged / other. State only; the amount of
+      cold work is equivalent_true_strain. Independent of strengthening mechanism (a sample can be peak-aged AND cold-worked)."
+  - name: processing_history
     type: str
-    description: "REQUIRED — one of: none / cold_rolling / hot_rolling / warm_rolling /
-      rotary_swaging / drawing / extrusion / forging / ECAP / HPT /
-      spark_plasma_sintering / sintering / other."
+    description: "Full processing route in reading order, recorded verbatim (lightly normalised);
+      the parsed fields below are pulled from it. Do not average temperatures or times — keep the
+      stated steps and ranges. E.g. 'cast; solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h'."
+
+  # ── Primary synthesis (how the billet was first made solid) ──
+  - name: primary_synthesis_route
+    type: str
+    description: "How the billet was first made solid, before any wrought processing —
+      exactly one of: cast / powder_metallurgy / additive_manufacturing / other / not_specified.
+      Independent of deformation and heat treatment. Most wrought Cu = cast; GlidCop = powder_metallurgy."
+  - name: synthesis_technique
+    type: str
+    description: "Specific named consolidation process if one applies, else null. One of:
+      spark_plasma_sintering / hot_isostatic_pressing / hot_pressing / conventional_sintering /
+      internal_oxidation / LPBF / DED / other. Null for plain casting or unspecified."
+
+  # ── Deformation (what operation / which technique / at what temperature / how much) ──
+  - name: deformation_mode
+    type: str
+    description: "Generic deformation operation — exactly one of:
+      none / rolling / forging / extrusion / drawing / swaging / compression / torsion / other.
+      'none' = as-cast or heat-treated only, no deformation."
+  - name: deformation_technique
+    type: str
+    description: "Specific named process if one applies, else null. One of:
+      rotary_swaging / ECAP / HPT / ARB / dynamic_plastic_deformation /
+      multidirectional_forging / twist_extrusion / other.
+      Use only when the process has a defining geometry or route beyond mode+temperature."
+  - name: deformation_temperature_regime
+    type: str
+    description: "Exactly one of: cryogenic / cold / warm / hot / not_specified.
+      Defined by recrystallization, not absolute temperature (see domain rules)."
   - name: deformation_temperature_K
     type: float
     unit: K
@@ -237,10 +445,8 @@ fields:
     type: float
     unit: "s^-1"
     description: "Deformation strain rate, if reported."
-  - name: processing_parameters
-    type: str
-    description: "Process-specific parameters as key:value with units, per deformation_process.
-      E.g. ECAP 'route=Bc; die_angle=90deg'; SPS 'pressure=50MPa; dwell=5min'. Null if none."
+
+  # ── Heat treatment (thermal steps; true order lives in processing_history) ──
   - name: solution_treatment_temp_K
     type: float
     unit: K
@@ -249,6 +455,10 @@ fields:
     type: float
     unit: min
     description: "Solution-treatment hold time (paired with the temperature above)."
+  - name: solution_treatment_quench
+    type: str
+    description: "Quench medium after solution treatment — e.g. water / brine / oil / polymer /
+      forced_air / air_cool / furnace_cool / gas / other. Null if no solution treatment or the medium is not stated."
   - name: aging_temp_K
     type: float
     unit: K
@@ -257,18 +467,26 @@ fields:
     type: float
     unit: min
     description: "Ageing hold time (paired with aging_temp_K)."
-  - name: anneal_recrystallization_temp_K
+  - name: annealing_temp_K
     type: float
     unit: K
-    description: "Annealing or recrystallization temperature, if performed."
-  - name: anneal_recrystallization_time_min
+    description: "Temperature of a thermal-only annealing step (no concurrent deformation), if performed."
+  - name: annealing_time_min
     type: float
     unit: min
-    description: "Annealing/recrystallization hold time (paired with the temperature above)."
-  - name: heat_treatment_steps
+    description: "Annealing hold time (paired with annealing_temp_K)."
+  - name: annealing_type
     type: str
-    description: "Non-standard/multi-step thermal schedule not captured above, as ordered
-      'step:temp:time:cooling' entries. Null if none."
+    description: "Purpose/effect of the anneal — one of: recovery / recrystallization / stress_relief / not_specified.
+      Recrystallization as a final STATE goes in material_condition; dynamic recrystallization during hot
+      working is deformation_temperature_regime=hot, not an annealing step."
+
+  # ── Process-specific catch-all ──
+  - name: processing_parameters
+    type: str
+    description: "Process-specific parameters as key:value with units, keyed to the relevant process
+      field (deformation_mode/technique or synthesis_technique). E.g. ECAP 'route=Bc; die_angle=90deg';
+      SPS 'pressure=50MPa; dwell=5min'. Null if none."
 
   # ── MICROSTRUCTURE: grain structure ──────────────────────────────────────────
   - name: grain_size_L_um
@@ -411,6 +629,8 @@ fields:
     description: "Uncertainties, methodology caveats, unit conversions, derived values.
       Tags: [methodology] [grain_size_methodology] [graph_read] [derived] [unit_converted] [scope_caveat] [finding]"
 
+
+
 # -----------------------------------------------------------------------------
 # MECHANICAL / FUNCTIONAL TEST BLOCKS  (nested; null if not run)
 # Each key is a test; its value nests conditions / specimen / results.
@@ -479,10 +699,23 @@ tests:
       - {name: loading_mode, type: str, description: "One of: axial / bending / torsional / multiaxial"}
       - {name: waveform, type: str, description: "e.g. 'triangular', 'sinusoidal'"}
       - {name: frequency_Hz, type: float, unit: Hz, description: "Cycling frequency, Hz"}
+      - {name: life_basis, type: str, description: "Life axis as reported: reversals_2Nf / cycles_Nf"}
+      - {name: strain_measure, type: str, description: "Strain reported as amplitude (de/2) or full range (de): amplitude / range"}
+      - {name: failure_criterion, type: str, description: "How Nf was defined, e.g. '10% peak-load drop', '25% load drop', 'specimen separation'. Nf is meaningless without it."}
+      - {name: environment, type: str, description: "Test environment: 'air' / 'vacuum' / 'inert_Ar' / 'corrosive_<medium>'. Fill only if stated; else null."}
+      - {name: strain_rate_per_s, type: float, unit: "s^-1", description: "Total strain rate (ISO 12106's controlled variable). If only frequency is reported, leave null and keep frequency_Hz; do not convert."}
+      - {name: sample_size, type: float, description: "Number of specimens behind this curve/condition, if stated (data-quality weight)."}
+      - {name: stress_measure, type: str, description: "Stress reported as amplitude (dsigma/2) or full range (dsigma): amplitude / range"}
     specimen:
       - {name: specimen_form, type: str, description: "One of: cylindrical / hourglass / flat / other"}
       - {name: specimen_gauge_diameter_mm, type: float, unit: mm, description: "Gauge diameter"}
       - {name: specimen_gauge_length_mm, type: float, unit: mm, description: "Gauge length"}
+      - {name: specimen_surface_roughness_Rz_um, type: float, unit: um, description: "Gauge surface roughness Rz (note in notes if reported as Ra). Surface finish is a primary fatigue-initiation factor."}
+    
+    # The flat coefficient/exponent fields below are BY DEFINITION the single full-range (total)
+      # Coffin-Manson-Basquin fit on a reversals + amplitude basis (life_basis=reversals_2Nf,
+      # strain_measure=amplitude). Anything else -> additional_parameters, never here.
+    
     results:
       - {name: cyclic_response, type: str, description: "'hardening' / 'softening' / 'stable' / 'mixed'"}
       - {name: fatigue_ductility_coefficient, type: float, description: "Coffin-Manson plastic coefficient eps_f'"}
@@ -499,7 +732,21 @@ tests:
         - {name: elastic_strain_amplitude_pct, type: float, unit: "%"}
         - {name: stress_amplitude_MPa, type: float, unit: MPa}
         - {name: cycles_to_failure_Nf, type: float}
+        - {name: run_out, type: bool, description: "true = specimen did not fail at Nf (run-out / arrowed point); Nf is then a lower bound, not a failure life."}
         description: "Strain-life curve: one entry per tested amplitude. Every reported point; null if only constants given."
+      - name: additional_parameters
+        item_fields:
+          - {name: framework, type: str, description: "Name as printed: coffin_manson / basquin / pseudo_wohler / golos_ellyn / cyclic_stress_strain / other"}
+          - {name: parameter_meaning, type: str, description: "Normalized meaning (see domain rules), e.g. fatigue_ductility_coefficient"}
+          - {name: symbol_as_printed, type: str, description: "Exact symbol/notation used in the paper"}
+          - {name: value, type: float}
+          - {name: unit, type: str, description: "MPa or null"}
+          - {name: fit_regime, type: str, description: "elastic / plastic / total / energy / na"}
+          - {name: fit_range, type: str, description: "verbatim, e.g. 'below transition', 'de_t<0.4%'"}
+          - {name: life_basis, type: str, description: "reversals_2Nf / cycles_Nf / not_stated (overrides conditions only if different)"}
+          - {name: strain_measure, type: str, description: "amplitude / range / na (overrides conditions only if different)"}
+          - {name: source_figure_or_table, type: str}
+        description: "Any fatigue parameter NOT captured by the flat result fields: regime-restricted or below/above-transition fits, Pseudo-Wohler, Golos-Ellyn/energy, or renamed/non-standard frameworks. Keeps the flat fields as the single canonical fit while omitting nothing."
 
 # -----------------------------------------------------------------------------
 # CHARACTERIZATION BLOCKS  (nested; acquisition params + method-EXCLUSIVE outputs)
@@ -516,7 +763,7 @@ characterization:
       - {name: examined_section, type: str, description: "e.g. 'L-T plane', 'fracture_surface'"}
       - {name: surface_prep, type: str, description: "e.g. 'polished', 'etched'"}
     results:
-      - {name: crack_initiation_site, type: str, description: "surface / subsurface / inclusion / pore / PSB / grain_boundary"}
+      - {name: crack_initiation_site, type: str, description: "surface / subsurface / inclusion / pore / slip bands / PSB / grain_boundary"}
       - {name: fatigue_striation_spacing_um, type: float, unit: um, description: "Striation spacing, um"}
       - {name: fracture_mode, type: str, description: "transgranular_dimple / cleavage / intergranular / mixed"}
       - {name: secondary_features, type: str, description: "e.g. secondary cracks, inclusions at initiation"}

@@ -46,6 +46,7 @@ REFERENCE_SNAPSHOT = Path(__file__).resolve().parent / "mixing_enthalpy_referenc
 _TOL = 1e-9
 
 
+
 # impute_nan=False is required. The default (True) replaces absent pairs with the
 # dataset mean (~-11 kJ/mol), silently fabricating values.
 _MIXING = MixingEnthalpy(impute_nan=False)
