@@ -601,9 +601,9 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         for record in data:
             rid  = record.get("record_id") or "?"
             mat  = record.get("material_name") or "?"
-            dbtt = record.get("DBTT_K", "null")
-            gs_l = record.get("grain_size_L_um", "null")
-            print(f"  {rid:10s}  {mat:20s}  DBTT={dbtt}K  grain_L={gs_l}µm")
+            comp    = record.get("composition_type") or "?"
+            has_lcf = "yes" if record.get("lcf") else "no"
+            print(f"  {rid:10s}  {mat:24s}  {comp:20s}  lcf={has_lcf}")
 
     return len(data) if isinstance(data, list) else 0
 
