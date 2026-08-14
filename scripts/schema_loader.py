@@ -13,8 +13,8 @@ YAML structure:
 A field may declare `item_fields` to become a list of sub-objects.
 """
 
-from dataclasses import field
-from xml.parsers.expat import model
+#from dataclasses import field
+#from xml.parsers.expat import model
 
 import yaml
 from pathlib import Path
@@ -52,9 +52,9 @@ def _resolve(field: dict, ns: str) -> tuple:
         return (Optional[dict], None)
 
     raise ValueError(
-        "Unknown type '{ftype}' for field '{name}' (in {ns}). "
-        "Supported types: str, float, int, bool, list[str], list[float], "
-        "list[int], list[bool], list, list[dict], dict, object.")
+        f"Unknown type '{ftype}' for field '{name}' (in {ns}). "
+        f"Supported types: str, float, int, bool, list[str], list[float], "
+        f"list[int], list[bool], list, list[dict], dict, object.")
 
 def _model(name: str, fields: list) -> type[BaseModel]:
     """Build a Pydantic model from a flat list of field dicts."""
