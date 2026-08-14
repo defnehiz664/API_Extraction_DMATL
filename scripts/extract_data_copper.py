@@ -53,6 +53,7 @@ import sys
 import json
 import base64
 import argparse
+import pymupdf4llm
 import requests
 from pathlib import Path
 from typing import Optional
@@ -129,11 +130,12 @@ GENERAL:
   from supplementary tables and figures
 - Each material/specimen gets its own JSON object
 - Use null for values not reported — never guess or invent values
-- Tabular values: a "=== TABLES ===" block gives each table with rows and columns intact.
-  Read every tabular value from there, matching each number to its row and column header.
-  It is authoritative over the running body text, where table cells are flattened and out
-  of order. Cite the table's label in source_figure_or_table.
-- - Flag ALL uncertainties, methodology notes, and caveats in the notes field
+- Tabular values: structured tables are provided — an Elsevier "=== TABLES ===" block for XML,
+  and/or Markdown pipe tables inside the paper text for PDFs. Read every tabular value from those
+  structured tables, matching each number to its row and column header. They are authoritative
+  over any flattened running text AND over the page images. Cite the table's label in
+  source_figure_or_table.
+- Flag ALL uncertainties, methodology notes, and caveats in the notes field
   using [tag] format: [methodology] [fit_parameter] [grain_size_methodology]
   [surrogate] [graph_read] [derived] [scope_caveat] [finding]
 
@@ -464,21 +466,11 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     input_format = None
     content_parts: list[tuple[str, bytes, str]] = []
 
-    def extract_pdf_text_layer(pdf_path: Path) -> str:
-        import fitz
-        doc = fitz.open(pdf_path)
-        blocks = []
-        for i, page in enumerate(doc, start=1):
-            blocks.append(f"\n--- PAGE {i} TEXT ---\n{page.get_text('text')}")
-            try:  # PyMuPDF >= 1.23; structured cells so digits are exact
-                for ti, tab in enumerate(page.find_tables().tables, start=1):
-                    rows = tab.extract()
-                    tsv = "\n".join("\t".join((c or "") for c in row) for row in rows)
-                    blocks.append(f"\n--- PAGE {i} TABLE {ti} ---\n{tsv}")
-            except Exception:
-                pass
-        doc.close()
-        return "\n".join(blocks)
+    def extract_pdf_markdown(pdf_path: Path) -> str:
+    #Layout-aware Markdown for the PDF, with tables rendered as Markdown pipe
+    #tables so row/column structure survives (raw get_text flattens two-column pages)."""
+        import pymupdf4llm
+        return pymupdf4llm.to_markdown(str(pdf_path))
 
     if xml_path.exists():
         input_format = "xml"
@@ -492,7 +484,11 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         input_format = "pdf"
         print(f"Input: PDF ({pdf_path.name})")
         content_parts = render_pdf_pages(pdf_path)
-        body_text = extract_pdf_text_layer(pdf_path)   # <-- exact text + parsed tables
+        body_text = extract_pdf_markdown(pdf_path)
+        print(f"  Markdown: {len(body_text):,} characters")
+        if len(body_text.strip()) < 200:
+            print("  WARNING: little or no text layer (possibly a scanned PDF); "
+                  "numbers will fall back to the page images (OCR-quality).")
 
     else:
         print(f"\nNo paper file found for DOI: {doi}")

@@ -295,15 +295,19 @@ domain_rules: |
   - strain_measure / stress_measure : amplitude (Δε/2) vs full range (Δε).
     Record exactly as the paper states. NEVER silently convert; conversion is a pipeline job.
 
-  D. FIT REGIME. The Coffin-Manson-Basquin coefficients are inherently branch-specific and belong in the flat fields:
-   - fatigue_strength_coefficient (σf') and fatigue_strength_exponent (b) = the ELASTIC (Basquin) line.
-   - fatigue_ductility_coefficient (εf') and fatigue_ductility_exponent (c) = the PLASTIC (Coffin-Manson) line.
-   fit_regime=elastic for σf'/b and fit_regime=plastic for εf'/c is EXPECTED. These, plus cyclic K'/n'
-   and the transition life, go in the FLAT result fields regardless of branch. Record the reported basis
-   in conditions.life_basis/strain_measure; do NOT divert to additional_parameters just because the basis
-   is cycles/range rather than reversals/amplitude.
-   additional_parameters is ONLY for: (a) an EXTRA fit over a restricted range reported alongside the main
-   one (e.g. a separate below-transition fit), and (b) non-CMB frameworks (Pseudo-Wohler, Golos-Ellyn/energy).
+  D. FIT REGIME / DOMAIN.
+  - The flat result fields (fatigue_strength_coefficient_MPa, fatigue_strength_exponent,
+    fatigue_ductility_coefficient, fatigue_ductility_exponent, cyclic K'/n', transition_fatigue_life,
+    elastic_strain_line_coefficient) are filled ONLY when the paper reports a SINGLE fit spanning
+    the whole strain-amplitude range: one elastic line and one plastic line over all data.
+  - If the paper reports more than one fit per branch (e.g. separate below/above-transition
+    segments), OR any range-restricted fit, OR a non-CMB framework (Pseudo-Wohler, Golos-Ellyn),
+    put EVERY such coefficient in additional_parameters with its fit_range, and leave the flat
+    fields null.
+  - NEVER pick one segment to populate a flat field. A range-restricted value is not the
+    material's single coefficient; presenting it as one is misrepresentation.
+  - Branch alone is not a reason to divert: for a genuine single global fit, the elastic (σf'/b)
+    and plastic (εf'/c) results still go in their flat fields.
 
   E. WHERE TO READ — table/equation beats plot.
   - If a value is TABULATED or stated in an EQUATION, take it from there exactly. Do NOT
