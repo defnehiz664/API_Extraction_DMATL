@@ -19,7 +19,7 @@ from xml.parsers.expat import model
 import yaml
 from pathlib import Path
 from typing import Optional
-from pydantic import create_model, BaseModel
+from pydantic import create_model, BaseModel, ConfigDict
 
 _SCALARS = {"str": str, "float": float, "int": int, "bool": bool}
 _LIST_SCALARS = {
@@ -63,7 +63,7 @@ def _model(name: str, fields: list) -> type[BaseModel]:
         if f["name"] in defs:
             raise ValueError(f"Duplicate field '{f['name']}' in model '{name}'")
         defs[f["name"]] = _resolve(f, name)
-    return create_model(name, **defs)
+    return create_model(name, __config__=ConfigDict(extra="forbid"), **defs)
 
 
 def _block_fields(block: dict) -> list:
@@ -90,7 +90,7 @@ def load_schema(yaml_path: Path) -> tuple:
             block_model = _model(block_name, _block_fields(block))
             top_defs[block_name] = (Optional[block_model], None)
 
-    return create_model(project, **top_defs), config
+    return create_model(project, __config__=ConfigDict(extra="forbid"), **top_defs), config
 
 
 def _field_line(field: dict, indent: str = "- ") -> str:

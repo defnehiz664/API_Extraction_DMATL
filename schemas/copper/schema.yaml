@@ -173,6 +173,13 @@ domain_rules: |
   LOADING DIRECTION:
   - loading_direction_relative_to_grain (inside each test block): the relationship between
     loading / crack propagation and grain elongation, e.g. "along_L", "along_S", "L-T crack system".
+  
+  DIRECTIONS & ORIENTATIONS (no inference). Record any direction or orientation relationship —
+    deformation/rolling direction, loading direction relative to grain, specimen axis vs rolling
+    direction, texture component — ONLY if the paper explicitly states it. NEVER infer a direction
+    from processing geometry or convention (e.g. do not assume rolling is along the normal direction,
+    or that the loading axis is along or across the grain, just because that is typical). If unstated,
+    the field is null and tagged [direction_not_stated].
 
   TESTS & CHARACTERIZATION:
   # --- existence: a value must be MEASURED, never manufactured ---
@@ -568,9 +575,15 @@ fields:
     description: "Twin boundary fraction, % (annealing twins are common in Cu)"
 
   # ── MICROSTRUCTURE: second-phase constituents (OBSERVED) ────────────────────
+  - name: precipitate_crystal_structure
+    type: str
+    description: "Crystal structure of the precipitate/second phase as reported, e.g. BCC / FCC / HCP /
+      B2 / L1_2 / DO22 / C15 Laves / tetragonal / amorphous. Capture the paper's own designation.
+      Fill ONLY if the paper determined it (XRD, selected-area or TEM diffraction); do not infer it
+      from the element. Tag [structure_probe_absent] in notes if the structure was not measured."
   - name: phase_type_and_volume_fraction
     type: str
-    description: "Observed phases and volume fractions, e.g. 'alpha-Cu + 5% Cr', 'alpha + beta brass 60/40'"
+    description: "Observed phases and volume fractions, e.g. 'alpha-Cu + 5% Cr', 'alpha + beta brass 60/40'" 
   - name: precipitate_size_distribution
     type: str
     description: "Observed precipitate size and spatial distribution, if present"

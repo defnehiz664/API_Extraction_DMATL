@@ -49,6 +49,11 @@ DEFAULT_CSV_OUT = REPO_ROOT / "data" / "features_output.csv"
 DEFAULT_XLSX_OUT = REPO_ROOT / "data" / "features_output.xlsx"
 DEFAULT_LOG_OUT = REPO_ROOT / "data" / "feature_log.txt"
 
+# Materials Project enrichment is a MODELLING-phase feature, not needed for paper
+# extraction (and it nulls for solid-solution alloys anyway). Disabled here to avoid
+# API calls; set True to reintroduce it when building the modelling dataset.
+ENABLE_MP_FEATURES = False
+
 # The pipeline's mendeleev-computed values are authoritative over whatever
 # Gemini put in these columns (Gemini is now instructed to leave them null
 # anyway; older records may still have Gemini-computed values). The
@@ -164,12 +169,13 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Pat
             mendeleev_feats = {}
 
         try:
-            mp_feats = compute_mp_features(fractions)
-            row.update(mp_feats)
-            if mp_feats.get("mp_query_skipped"):
-                log_lines.append(f"  mp features skipped: {mp_feats['mp_query_skipped']}")
-            else:
-                log_lines.append(f"  mp features: OK (material_id={mp_feats.get('mp_material_id')}, all_phases_found={mp_feats.get('mp_all_phases_found')})")
+            if ENABLE_MP_FEATURES:
+                mp_feats = compute_mp_features(fractions)
+                row.update(mp_feats)
+                if mp_feats.get("mp_query_skipped"):
+                    log_lines.append(f"  mp features skipped: {mp_feats['mp_query_skipped']}")
+                else:
+                    log_lines.append(f"  mp features: OK (material_id={mp_feats.get('mp_material_id')}, all_phases_found={mp_feats.get('mp_all_phases_found')})")
         except Exception as e:
             log_lines.append(f"  mp features FAILED: {e}")
             mp_feats = {}
