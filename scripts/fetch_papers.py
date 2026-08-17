@@ -61,6 +61,7 @@ ELSEVIER_DOI_PREFIX = "10.1016/"
 DOIS = [
     "10.1016/j.ijfatigue.2016.07.019",
     "10.1007/s10854-020-04333-3",
+    "COPPER ALLOYS FOR HIGH HEAT FLUX STRUCTURE APPLICATIONS",
 ]
 
 # ── HELPERS ──────────────────────────────────────────────────────────────────

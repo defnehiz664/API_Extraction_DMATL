@@ -1,9 +1,9 @@
 [
   {
     "doi": "10.1016/j.ijfatigue.2016.07.019",
-    "status": "full_text",
-    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-ijfatigue-2016-07-019.xml",
-    "message": "Full text XML saved (267232 chars)"
+    "status": "error",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-ijfatigue-2016-07-019_error.txt",
+    "message": "HTTP 400 - unexpected error"
   },
   {
     "doi": "10.1007/s10854-020-04333-3",
@@ -11,8 +11,8 @@
     "message": "No open-access PDF found via Unpaywall.\nDownload the PDF manually and save it as:\n  data/papers/10-1007_s10854-020-04333-3.pdf\nThen run: python scripts/extract_data.py 10.1007/s10854-020-04333-3"
   },
   {
-    "doi": "10.1007/s12598-019-01238-x",
-    "status": "no_oa_pdf",
-    "message": "No open-access PDF found via Unpaywall.\nDownload the PDF manually and save it as:\n  data/papers/10-1007_s12598-019-01238-x.pdf\nThen run: python scripts/extract_data.py 10.1007/s12598-019-01238-x"
+    "doi": "COPPER ALLOYS FOR HIGH HEAT FLUX STRUCTURE APPLICATIONS",
+    "status": "error",
+    "message": "Unpaywall returned 404"
   }
 ]

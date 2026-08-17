@@ -4,48 +4,13 @@ extract_data.py
 Extracts structured data from papers using Gemini, matching dataset schema exactly.
 
 Supports two input formats:
-  - Elsevier XML  → body text + individual figure downloads via Elsevier API
-  - PDF           → each page rendered as an image (for non-Elsevier papers)
-
-Before extraction, runs a second Gemini call to classify every figure by
-type. Only figures matching SAVED_FIGURE_TYPES (currently: EBSD) are
-saved to disk — all figures are still sent to the main extraction call
-regardless, so property plots, micrographs, and other relevant figures are
-still read for data, they're just not kept as image files afterward.
-
-SETUP
------
-    pip install -r requirements.txt
-
-    .env file needs:
-        ELSEVIER_API_KEY=your_elsevier_key
-        GOOGLE_CLOUD_PROJECT=matmodel-literaturemining-govc
-        GOOGLE_CLOUD_LOCATION=europe-west4
-        GOOGLE_GENAI_USE_ENTERPRISE=True
-
-    Authenticate once per machine:
-        gcloud auth application-default login
-        gcloud auth application-default set-quota-project matmodel-literaturemining-govc
-        (use dabiakar@ethz.ch — NOT the student address)
-
-USAGE
------
-    # Process ALL fetched papers not yet extracted (recommended):
-    python scripts/extract_data.py --batch
-
-    # Process a single paper by DOI:
-    python scripts/extract_data.py 10.1016/j.jmst.2026.01.050
-
-    For paywalled non-Elsevier papers:
-        1. Download the PDF and save as data/papers/{sanitized-doi}.pdf
-        2. Add the DOI to data/papers/manual_papers.json
-        3. Run --batch
+  - Elsevier XML  → body text + structured tables + individual figure downloads
+  - PDF           → layout-aware Markdown (pymupdf4llm, OCR fallback) + page images
 
 OUTPUT
 ------
-    data/outputs/{doi}_extraction.json   — structured extraction + figure classifications
-    data/figures/{doi}/                  — only figures classified as one of
-                                            SAVED_FIGURE_TYPES (EBSD by default)
+    data/outputs/{doi}_extraction.json   — structured extraction
+    data/figures/{doi}/                  — saved EBSD figures (by default)
 """
 
 import os
@@ -78,8 +43,7 @@ if not GOOGLE_CLOUD_PROJECT:
         "Then run: gcloud auth application-default login"
     )
 
-MODEL        = "gemini-3.5-flash" 
-
+MODEL        = "gemini-3.5-flash"
 
 PROJECT_ROOT = Path(__file__).parent.parent
 PAPERS_DIR   = PROJECT_ROOT / "data" / "papers"
@@ -89,13 +53,13 @@ FIGURES_DIR  = PROJECT_ROOT / "data" / "figures"
 PDF_DPI = 400
 
 FIGURE_TYPES = [
-    "microstructure",          # optical/SEM/TEM images of grain structure, porosity, precipitates, inclusions
-    "property_curve",         # stress-strain, hardness, strength/ductility, conductivity/resistivity vs. temperature/processing plots
-    "phase_diagram",          # phase diagrams, constitution/processing maps, precipitation maps
-    "EBSD",                   # IPF maps, pole figures, grain boundary maps, misorientation plots
-    "fracture_surface",       # SEM images of fracture surfaces (intergranular, cleavage, etc.)
-    "map",                    # EDS/WDS maps, strain maps, dislocation density maps, texture maps
-    "other",                  # schematics, XRD patterns, photographs, tables, flow charts
+    "microstructure",
+    "property_curve",
+    "phase_diagram",
+    "EBSD",
+    "fracture_surface",
+    "map",
+    "other",
 ]
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -105,9 +69,9 @@ def doi_to_filename(doi: str) -> str:
 
 
 def build_extraction_prompt(doi: str, schema_config: dict) -> str:
-    domain_rules   = schema_config.get("domain_rules", "").strip()
+    domain_rules    = schema_config.get("domain_rules", "").strip()
     material_system = schema_config.get("material_system", "materials science")
-    field_section  = build_schema_prompt_section(schema_config)
+    field_section   = build_schema_prompt_section(schema_config)
 
     return f"""You are a materials science data extraction assistant.
 Your task is to extract structured data from a scientific paper about {material_system}.
@@ -116,7 +80,7 @@ Your task is to extract structured data from a scientific paper about {material_
 STEP 1 — CONFIRM WHAT YOU CAN SEE
 ═══════════════════════════════════════════════════════════════
 Before extracting, briefly confirm in the first record's notes field:
-- Which figures you can read (e.g. "Confirmed: can read hysteresis loop, cyclic stress response curve, strain-life (ε-N) plot, XRD diffractogram, SEM/BSE micrograph")
+- Which figures you can read
 - Which figures contain data you extracted from
 - Any figures that were unreadable or ambiguous
 - Whether supplementary material was provided and what it contained
@@ -139,46 +103,22 @@ GENERAL:
   using [tag] format: [methodology] [fit_parameter] [grain_size_methodology]
   [surrogate] [graph_read] [derived] [scope_caveat] [finding]
 
-  Tag meanings (use exactly):
-    [fit_parameter]  - a CM-Basquin/cyclic coefficient; say if tabulated, author-fit, or needs re-fitting
-    [surrogate]      - value is for a near-neighbor alloy/temper, not this specimen
-    [scope_caveat]   - value valid only under a stated restriction (temperature, R-ratio, environment)
-    [graph_read]     - digitized off a plot; add [high]/[low]
-    [derived]        - computed from other reported values, not measured
-    ... (one line each)
-
 RECORD ID:
 - Leave record_id as null — it will be assigned manually in Excel
 
-GRAPHS AND FIGURES:
-- For any figure that shows a graph or plot: read the axis labels and units,
-  then extract data points as (x_value, y_value, series_label) tuples
-- For continuous curves: extract ~10-20 points per series, more at inflection points
-- For discrete scatter plots: extract every visible point
-- Tag confidence in notes: [graph_read][high] for clear gridlines / single series,
-  [graph_read][low] for overlapping series, log scale, or small symbols
-
-CITATION PROVENANCE:
-- For each record, check if the paper's authors explicitly state that specific
-  data values were TAKEN FROM another work for this copper-alloy record
-    (e.g. "composition values from [5]", "yield strength data replotted from
-    Bonnekoh et al. [12]", "electrical conductivity values adapted from [8]")
-- If yes: fill data_from_reference with the reference numbers, e.g. ["[5]", "[8]"]
-  and fill reference_titles with the author-year strings in the same order,
-  e.g. ["Bonnekoh 2019", "Riesch et al. 2021"]
-- DO NOT fill these for general background or comparison citations —
-  only for explicit data provenance for composition, microstructure,
-+  mechanical properties, or electrical properties
-- If data was generated by the authors of this paper, leave both null
-
 NUMERIC FIDELITY (tables and text):
-- A PAPER TEXT / TABLE TEXT block (the PDF's own text layer) is provided. Take EVERY numeric
+- A PAPER TEXT / TABLE TEXT block (the paper's text layer) is provided. Take EVERY numeric
   value verbatim from that text, character for character. Do NOT read numbers off the page
   images; images are for figures, plots, and layout only.
 - Copy digits and decimal places exactly as printed. Never round, rescale, or clean up a value:
   12.34 stays 12.34, not 12.3 or 12.
-- If a number exists only in an image (a plot), extract it as a plot reading and tag
-  [graph_read]; do not treat it as a table value.
+- If a number exists only in an image (a plot), extract it as a plot reading and tag [graph_read].
+
+CITATION PROVENANCE:
+- For each record, check if the authors explicitly state that specific data values were TAKEN
+  FROM another work (e.g. "composition values from [5]"). If yes, fill data_from_reference with the
+  reference numbers and reference_titles with the author-year strings in the same order. Do NOT fill
+  these for general background or comparison citations. If the data is the authors' own, leave null.
 
 {domain_rules}
 
@@ -201,6 +141,7 @@ STEP 4 — OUTPUT FORMAT
 # ── ELSEVIER XML ROUTE ────────────────────────────────────────────────────────
 
 SVAPI_NS = "http://www.elsevier.com/xml/svapi/article/dtd"
+
 
 def extract_xml_tables(xml_path: Path) -> str:
     """Render each XML <table> as a structured Markdown table so row/column
@@ -340,6 +281,28 @@ def render_pdf_pages(pdf_path: Path, dpi: int = PDF_DPI) -> list[tuple[str, byte
     return pages
 
 
+def extract_pdf_markdown(pdf_path: Path) -> str:
+    """Layout-aware Markdown for the PDF, with tables rendered as Markdown pipe tables.
+    If the text layer is thin/absent (a scan), OCR the PDF with ocrmypdf and retry."""
+    md = pymupdf4llm.to_markdown(str(pdf_path))
+    if len(md.strip()) >= 200:
+        return md
+    # thin/absent text layer -> likely a scan: add a text layer with OCR, then retry
+    ocr_path = pdf_path.with_name(pdf_path.stem + "_ocr.pdf")
+    if not ocr_path.exists():
+        import subprocess
+        try:
+            subprocess.run(
+                ["ocrmypdf", "--skip-text", str(pdf_path), str(ocr_path)],
+                check=True, capture_output=True)
+        except Exception as e:
+            print(f"  OCR unavailable/failed ({e}); using thin text layer as-is")
+            return md
+    md_ocr = pymupdf4llm.to_markdown(str(ocr_path))
+    print(f"  OCR applied: {len(md.strip())} -> {len(md_ocr.strip())} chars")
+    return md_ocr if len(md_ocr.strip()) > len(md.strip()) else md
+
+
 # ── SUPPLEMENTARY DOCX ────────────────────────────────────────────────────────
 
 def extract_docx_text(docx_path: Path) -> str:
@@ -393,7 +356,7 @@ def save_selected_figures(
     allowed = allowed_labels if allowed_labels is not None else _ebsd_figure_ids_from_env()
 
     if not allowed:
-        print("  No EBSD figure IDs configured; skipping figure saving to avoid unnecessary classification calls.")
+        print("  No EBSD figure IDs configured; skipping figure saving.")
         return figures_dir
 
     saved = 0
@@ -466,12 +429,6 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     input_format = None
     content_parts: list[tuple[str, bytes, str]] = []
 
-    def extract_pdf_markdown(pdf_path: Path) -> str:
-    #Layout-aware Markdown for the PDF, with tables rendered as Markdown pipe
-    #tables so row/column structure survives (raw get_text flattens two-column pages)."""
-        import pymupdf4llm
-        return pymupdf4llm.to_markdown(str(pdf_path))
-
     if xml_path.exists():
         input_format = "xml"
         print(f"Input: XML ({xml_path.name})")
@@ -487,14 +444,12 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         body_text = extract_pdf_markdown(pdf_path)
         print(f"  Markdown: {len(body_text):,} characters")
         if len(body_text.strip()) < 200:
-            print("  WARNING: little or no text layer (possibly a scanned PDF); "
-                  "numbers will fall back to the page images (OCR-quality).")
+            print("  WARNING: little or no text layer even after OCR; "
+                  "numbers will rely on the page images (OCR-quality).")
 
     else:
         print(f"\nNo paper file found for DOI: {doi}")
         print(f"Expected: {xml_path}  or  {pdf_path}")
-        print(f"\nFor Elsevier: add DOI to fetch_papers.py and run it (ETH VPN required)")
-        print(f"For others:   save PDF as data/papers/{doi_slug}.pdf")
         sys.exit(1)
 
     # ── Step 2: Supplementary docx ─────────────────────────────────────────────
@@ -517,7 +472,7 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         location=GOOGLE_CLOUD_LOCATION,
     )
 
-    # ── Step 4: Save only explicitly configured EBSD figures (no extra classification pass) ─
+    # ── Step 4: Save only explicitly configured EBSD figures ──────────────────
     ebsd_labels = _ebsd_figure_ids_from_env() or {"gr12"}
     figures_dir = save_selected_figures(doi_slug, content_parts, ebsd_labels)
 
@@ -548,7 +503,7 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         config=types.GenerateContentConfig(
             temperature=0.0,
             max_output_tokens=max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            thinking_config=types.ThinkingConfig(thinking_budget=4096),
             response_mime_type="application/json",
             #response_schema=list[schema_model],
         ),
@@ -570,10 +525,16 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         print(f"  Parsed: {len(data)} material records")
     except json.JSONDecodeError as e:
         print(f"  JSON parse failed: {e}")
-        if str(finish_reason) == "MAX_TOKENS" or "MAX_TOKENS" in str(finish_reason):
+        if "MAX_TOKENS" in str(finish_reason):
             print(f"  --> Response was TRUNCATED by max_output_tokens={max_output_tokens}. "
                   f"Raise max_output_tokens or split this paper's extraction into fewer records per call.")
         data = {"error": "parse_failed", "finish_reason": str(finish_reason), "raw": raw}
+
+    # give each record a stable id tied to the source
+    if isinstance(data, list):
+        for i, rec in enumerate(data, start=1):
+            if isinstance(rec, dict) and not rec.get("record_id"):
+                rec["record_id"] = f"{doi_slug}-{i}"
 
     output = {
         "model":           MODEL,
@@ -595,8 +556,8 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     if isinstance(data, list):
         print(f"\n── EXTRACTION SUMMARY ({len(data)} records) ──")
         for record in data:
-            rid  = record.get("record_id") or "?"
-            mat  = record.get("material_name") or "?"
+            rid     = record.get("record_id") or "?"
+            mat     = record.get("material_name") or "?"
             comp    = record.get("composition_type") or "?"
             has_lcf = "yes" if record.get("lcf") else "no"
             print(f"  {rid:10s}  {mat:24s}  {comp:20s}  lcf={has_lcf}")
@@ -619,7 +580,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--schema",
         default=DEFAULT_SCHEMA,
-        help=f"Path to schema YAML (default: schemas/copper/schema.yaml)",
+        help="Path to schema YAML (default: schemas/copper/schema.yaml)",
     )
 
     args = parser.parse_args()
