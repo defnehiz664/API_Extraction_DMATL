@@ -217,10 +217,15 @@ domain_rules: |
     computed from inputs you extracted. This exception NEVER extends to physical measured
     properties (hardness, strength, modulus, resistivity, fatigue coefficients).
 
-  - graph_read is allowed and is NOT conversion. A value digitized off a plot in THIS paper is a
-    reported measurement; tag [graph_read]. Reading a datum off the paper's own figure is fine;
-    computing a datum the paper never showed is not.
-  OBSERVED-IN-THIS-WORK RULE (no extraction from background/introduction).
+  - Values shown ONLY in a figure (plot points, curves) are NOT read or estimated by you, and you
+  never compute or guess a datum the paper did not tabulate. Figure-only data is cataloged in
+  figure_digitization_manifest and digitized by hand later (see FIGURE DIGITIZATION below).
+
+  FIGURE DIGITIZATION (metadata only, no coordinate reading).
+  - For each data plot, add one figure_digitization_manifest entry with its axes, scale, series, and
+  whether the same data is already tabulated. Do NOT read or estimate coordinate values off a plot;
+  vision-read points are not trusted. Set worth_digitizing=true only when the figure holds data not
+  present in any table or equation.
 
   - Fill a field ONLY from what THIS paper observed, measured, or determined for THIS
     material-condition in its own Methods, Results, or Discussion. Statements in the
@@ -322,9 +327,8 @@ domain_rules: |
   - Digitize a plot ONLY for datapoints not otherwise reported. Before digitizing, name the
     exact figure+subfigure in plot_source, read the axis labels, units, and scale (LCF plots
     are usually log-log), and identify each series (elastic/plastic/total, or a strain range).
-    Tag every point [graph_read] with [high]/[low].
-  - If axes or series are unreadable, record fewer points or none and tag [graph_read][low].
-    NEVER invent points to complete a curve. Anti-fabrication and observed-in-this-work rules apply.
+    
+  - NEVER invent points to complete a curve. Anti-fabrication and observed-in-this-work rules apply.
 
   F. PLOT TYPES (plot_type vocabulary):
     strain_life                     : strain amplitude vs reversals/cycles to failure
@@ -654,7 +658,7 @@ fields:
   - name: notes
     type: str
     description: "Uncertainties, methodology caveats, unit conversions, derived values.
-      Tags: [methodology] [grain_size_methodology] [graph_read] [derived] [unit_converted] [scope_caveat] [finding]"
+      Tags: [methodology] [grain_size_methodology] [derived] [unit_converted] [scope_caveat] [finding]"
 
 
 

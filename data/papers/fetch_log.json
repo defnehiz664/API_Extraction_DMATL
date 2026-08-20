@@ -9,10 +9,5 @@
     "doi": "10.1007/s10854-020-04333-3",
     "status": "no_oa_pdf",
     "message": "No open-access PDF found via Unpaywall.\nDownload the PDF manually and save it as:\n  data/papers/10-1007_s10854-020-04333-3.pdf\nThen run: python scripts/extract_data.py 10.1007/s10854-020-04333-3"
-  },
-  {
-    "doi": "COPPER ALLOYS FOR HIGH HEAT FLUX STRUCTURE APPLICATIONS",
-    "status": "error",
-    "message": "Unpaywall returned 404"
   }
 ]
