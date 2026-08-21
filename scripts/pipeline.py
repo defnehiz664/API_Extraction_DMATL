@@ -42,6 +42,7 @@ from element_table import build_element_table
 from mendeleev_features import compute_mendeleev_features
 from mp_features import compute_mp_features
 #from usfe_features import compute_usfe_features
+from lcf_export_patch import _write_excel_output
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUTS_DIR = REPO_ROOT / "data" / "outputs"
@@ -83,61 +84,7 @@ def load_all_records(outputs_dir: Path) -> list:
             records.append(rec)
     return records
 
-def _write_excel_output(df: pd.DataFrame, excel_out: Path):
-    """records sheet keeps every column (blocks as blobs). Each nested block (lcf, SEM,
-    TEM, XRD, ...) gets ONE sheet in long format: the block's scalar fields plus, expanded
-    into rows, its primary list-of-objects (e.g. additional_parameters). One row per entry,
-    record fields repeated. No separate per-list sheet."""
-    excel_out.parent.mkdir(parents=True, exist_ok=True)
 
-    def _rid(row):
-        return row.get("record_id") or row.get("material_name") or "unknown"
-
-    def _is_dict_col(series):
-        return any(isinstance(v, dict) for v in series)
-
-    def _obj_list_keys(block):
-        return [k for k, v in block.items()
-                if isinstance(v, list) and v and all(isinstance(x, dict) for x in v)]
-
-    dict_cols = [c for c in df.columns if _is_dict_col(df[c])]
-
-    with pd.ExcelWriter(excel_out, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="records", index=False)   # blobs kept here
-
-        for block_name in dict_cols:
-            # pick the primary object-list to expand into rows (the one with most entries)
-            counts = {}
-            for _, row in df.iterrows():
-                block = row.get(block_name)
-                if isinstance(block, dict):
-                    for k in _obj_list_keys(block):
-                        counts[k] = counts.get(k, 0) + len(block[k])
-            primary = max(counts, key=counts.get) if counts else None
-
-            rows_out = []
-            for _, row in df.iterrows():
-                block = row.get(block_name)
-                if not isinstance(block, dict):
-                    continue
-                rid = _rid(row)
-                scalar = {"record_id": rid}
-                for k, v in block.items():
-                    if k == primary:
-                        continue
-                    scalar[k] = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
-                entries = block.get(primary) if primary else None
-                if entries:
-                    for e in entries:
-                        rows_out.append({**scalar, **e})   # entry values win on overlap (fit-level precedence)
-                else:
-                    rows_out.append(scalar)
-
-            if rows_out:
-                pd.DataFrame(rows_out).to_excel(writer, sheet_name=block_name[:31], index=False)
-
-
-    
 
 def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Path):
     records = load_all_records(outputs_dir)

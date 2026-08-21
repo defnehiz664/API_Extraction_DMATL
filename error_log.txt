@@ -1,0 +1,74 @@
+--20.08.2026 
+1. Pipeline added additional rows for the intermediate thermomechanical steps for the two-step paper in the gold standard. 
+    This didn´t occur before adding the thinking capability to the model.
+
+
+-- food for thought -- the below list in the schema should be expanded to the rather conventional  
+                        ones too, including cold rolling instead of heaving an empty cell, 
+                        the same for deformation_method to at least include hot forming
+    - name: deformation_technique
+    type: str
+    description: "Specific named process if one applies, else null. One of:
+      rotary_swaging / ECAP / HPT / ARB / dynamic_plastic_deformation /
+      multidirectional_forging / twist_extrusion / other.
+      Use only when the process has a defining geometry or route beyond mode+temperature."
+
+-- food for thought -- the name of this column should be changed if it´s only consolidation methods
+    - name: synthesis_technique
+    type: str
+    description: "Specific named consolidation process if one applies, else null. One of:
+      spark_plasma_sintering / hot_isostatic_pressing / hot_pressing / conventional_sintering /
+      internal_oxidation / LPBF / DED / other. Null for plain casting or unspecified."
+
+2. von mises total strain calculation is wrong.
+    the total reduction cannot be obtained by adding the percent thickness reduction from different processes,
+    but the rule should be instead:
+        1/ln(1-((1-r1)*(1-r2)*(1-r3)))
+    the total percent reduction should be instead:
+        1-((1-r1)*(1-r2)*(1-r3))
+
+3. number of passes should be better explained. in the two-step paper, there are not multiple passes of the same
+    thermomechanical process, but multiple different ones applied back to back, so the calculation should not follow the multipass rule, 
+    unless stated explicitly in the paper. if not stated, the cells should get N/A as in not applicable. 
+
+-- food for thought -- the standard deviation of the grain size distribution could be counted after the plots get
+    digitalized, if the paper includes grain size distribution histogram. 
+    
+4. Why doesn´t the pipeline infer this from taking a look over the plots? for this descriptor, real values are not super necessary,
+    just a qualitative description would do.
+    - name: grain_size_distribution
+    type: str
+    description: "Spread/uniformity, e.g. 'narrow', 'bimodal', 'broad'" --> could be expanded a bit more, right-skewed, etc.
+
+-- food for thought -- data digitalization to read XRD signals for texture, phase identification, etc.
+
+-- food for thought -- adding to the precipitate size distribution, there should be a column for average precipitate size 
+                        and the method for determining these.
+
+-- food for thought -- elongation_at_fracture_pct': None in the tensile section could be inferred from engineering strain vs stress plot.
+
+-- food for thought -- add the indendation duration for vickers hardness
+
+-- food for thought -- there are many other parameters on strengthening mechanisms, e.g. two-step paper Tables 4-7.
+
+5. change tthe assumed direction for microscopy etc. characterization to the one in the two-step paper because it is the most logical one
+    i.e. imaging is done on the plane with transverse and normal to longitudinal/rolling direction.
+
+-- food for thought -- some columns about fracture surface, some papers have relevant descriptions.
+
+6. Cu-Ni-Si paper figure description only includes the description of the first inset and not the rest
+
+7. electropolishing vs more detailed electropolishing techniques is still on
+
+8. if the identification number of the alloy is given in the materials/methods or relevant section, 
+    then use it to calculate the concentration from the mean concentration values. it´s no use when there are no concentration values given.
+
+9. copper busbar no mention of cold work, says only drawn but the material_condition is given as cold rolled
+
+
+--21.08
+10. coffin manson parameters don´t have to be always given as percentages, as seen in the copper busbar paper.
+    add this distinction to the schema. 
+
+11. extra excel subsheets are created in the excel sheet via the pipeline, instead of adding the relevant
+    information as a second row to the readily existing subsheets.
