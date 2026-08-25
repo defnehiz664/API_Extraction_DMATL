@@ -1,0 +1,12 @@
+Date,Hash,Commit Message,Summary
+7/24/26,74af3752,introduced things to defne,
+8/3/26,67b6aeb2,DBTT/refractory alloys/BCC cleanup.  mendeleev_features weighing scheme updated.,
+8/5/26,f37b370e,New script mixing_enthalpy.py added to automatically retrieve binary mixing enthalpy values from matminer to be used in mendeleev_features.py. Elements being considered here are tied to the VEC_TABLE (to be manually edited according to the material system is used) from element_table.py.,
+8/6/26,d55c1a47,schema for copper decluttered and reorganized.,
+8/6/26,5aa1491d,updated schema_loader.py to match the three-section architecture in the schema.yaml for Cu.,
+8/7/26,e4b1fb51,Dina fixed schema.yaml,
+8/13/26,8ffcd6e3,Render each XML <table> as a structured Markdown table so row/column     associations survive (extract_body_text flattens them). new function added to extract_data_copper.py to read the tables,
+8/13/26,ef302db7,updates to schema to ensure the fatigue parameters are categorized correctly and not stuck in the additional parameters section.,
+8/14/26,e30e17a0,Two new routes are active now: XML files extracted from Elsevier API or PDF files extracted and read by pymudf4llm. check_table.py is to check whether the tabulated values are correctly read and parsed.,
+8/14/26,16d295f2,changes to schema_loader.py to flag any unexpected label coming from Gemini instead of ignoring it.,
+8/20/26,182b6f59,Added error_log.txt to keep track of the major errors due to the changes to the schema and the pipeline.,

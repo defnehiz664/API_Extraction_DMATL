@@ -1,0 +1,501 @@
+# =============================================================================
+# Copper PROJECT SCHEMA
+# Copper alloys, microstructure, bench test results
+# and mechanical properties.
+# =============================================================================
+
+project: copper
+material_system: "Copper (Cu) and Cu-based alloys"
+record_id_prefix: "Cu"
+
+# -----------------------------------------------------------------------------
+# DOMAIN RULES
+# This block is injected verbatim into the Gemini extraction prompt.
+# It contains all W-specific knowledge. A different student project would
+# replace this block with their own domain rules.
+# -----------------------------------------------------------------------------
+domain_rules: |
+  COMPOSITION:
+  - composition_type must be exactly one of: pure, doped, alloy
+    - pure = a near-pure base-metal system with no intentional dopants
+      (e.g. Cu >= 99.9% or another base metal near-pure)
+    - doped = a base metal with trace intentional additions below about 1 wt%
+      of elements such as Ti, Zr, Nb, Ta, W, Cr, Mn, Fe, Ni, Co, Al, Si,
+      Sn, Zn, Mg, Li, Be, P, S, O, N, C, Te, etc.
+    - alloy = a system with significant alloying additions of major elements
+      such as Ni, Co, Cr, Mn, Fe, Ti, Zr, Nb, Ta, W, Al, Si, Sn, Zn, Mg,
+      Cu, Ag, Pb, Sb, Bi, or related elements
+  - Known element symbols in this project (from the VEC lookup table):
+    Cu, Ag, Al, Si, Zn, Sn, Ni, Co, Mn, Mg, Fe, Cr, P, Pb, Sb, Bi,
+    Ti, Zr, W, Nb, Ta, Li, Cd, S, Be, O, C, N, Te
+  - dopant_concentration_unit must be exactly one of: ppm, wt%, at%
+
+  CALCULATED DESCRIPTORS — DO NOT CALCULATE THESE, leave them null:
+  - VEC, delta_H_mix_kJ_mol, delta_S_mix_J_mol_K, delta_atomic_size:
+    Leave ALL of these as null. They will be computed later by the
+    database/feature pipeline from the composition fields you extracted.
+    Do not attempt to calculate them manually in the extraction step.
+
+  GRAIN SIZE:
+  - grain_size_L_um = longitudinal / rolling direction (RD/LD)
+  - grain_size_T_um = transverse direction (TD)
+  - grain_size_S_um = short-transverse / normal direction (ND, thickness direction)
+  - grain_size_estimated_dimensions must be exactly one of:
+    none / partial / x_y_estimated / single_direction_only /
+    reported_as_D10_D50_D90_distribution_not_xyz
+  - Match paper coordinate system (x/y/z notation) to L/T/S from the paper's
+    description of rolling/forging geometry.
+
+  DISLOCATION DENSITY:
+  - pre_existing_dislocation_density_m2: units must be m^-2 (not cm^-2).
+    Use this for the dislocation density present in the material before any
+    additional deformation or testing event, if explicitly reported.
+    Typical values are often in the range 10^10 to 10^14 m^-2 for heavily
+    processed or deformed metallic materials, but report the paper's value
+    directly when given.
+    Conversion: 1 cm^-2 = 10^4 m^-2 (so 10^7 cm^-2 = 10^11 m^-2).
+  - dislocation_structure_description: describe the observed dislocation
+    arrangement (e.g. cell walls, tangles, planar arrays, stacking faults,
+    twins, or other characteristic structures).
+  - dislocation_density_method: record the measurement method if stated
+    (e.g. EBSD, TEM, XRD line broadening, etch-pit counting).
+
+
+  PROCESSING:
+  - processing_history format: [method]; [temperature_range]; [reduction_%]; [passes]; [condition]
+    Methods: cold_rolled / hot_rolled / warm_rolled / rotary_swaged / annealed /
+    recrystallized / hot_forged / spark_plasma_sintered / powder_injection_molded / sintered
+    Example: "hot_rolled; 1450-1650C; 20-25%/pass; 5_passes; annealed"
+  - logarithmic_strain: calculate as ln(1/(1-total_reduction)) if not directly reported.
+    If reported as passes x per-pass reduction: eps = n * ln(1/(1-r_per_pass))
+  - deformation_temperature_K: temperature during deformation, in Kelvin.
+
+  LOADING DIRECTION:
+  - loading_direction_relative_to_grain: describe relationship between loading /
+    crack propagation and grain elongation direction.
+    Examples: "along_L_direction" / "along_S_direction" / "L-T crack system"
+  
+  COMPOSITION STRING:
+  - composition_string: compute this from the composition you extracted.
+    Convert all concentrations to atomic fractions first, then format as
+    element+fraction pairs with no spaces, e.g. "W0.9Re0.1Ta0.05".
+    Pure W = "W1". Trace dopants at ppm: include them, e.g. "W0.99994K0.00006".
+    This field is used by the database pipeline to query Materials Project.
+    Never leave it null if composition_type and concentrations are known.
+
+# -----------------------------------------------------------------------------
+# FIELDS
+# Each field becomes one entry in the dynamic Pydantic model AND one line
+# in the Gemini extraction prompt. Keep descriptions concise — they are
+# injected directly into the prompt.
+# -----------------------------------------------------------------------------
+fields:
+  # ── IDENTITY ────────────────────────────────────────────────────────────────
+  - name: record_id
+    type: str
+    description: "Leave null — assigned manually in Excel"
+
+  - name: material_name
+    type: str
+    description: "Material name, e.g. 'pure W', 'W-K', 'W-3wt%Re'"
+
+  - name: commercial_grade_name
+    type: str
+    description: "Commercial or proprietary grade name, e.g. 'Plansee WVM', 'Densimet 185'"
+
+  # ── COMPOSITION ─────────────────────────────────────────────────────────────
+  - name: composition_type
+    type: str
+    description: "Exactly one of: pure / doped / alloy (see domain rules)"
+
+  - name: base_material_purity_pct
+    type: float
+    unit: wt%
+    description: "W purity in wt%, e.g. 99.97"
+
+  - name: impurities
+    type: str
+    description: "Impurity elements listed, e.g. 'O, N, C, Fe' — free text"
+
+  - name: impurity_concentration
+    type: float
+    unit: ppm
+    description: "Total impurity level in ppm if reported as a single number"
+
+  - name: dopant_or_alloying_element
+    type: str
+    description: "Primary dopant or alloying element symbol, e.g. 'Cr', 'Ni', 'Al2O3'"
+
+  - name: dopant_concentration
+    type: float
+    description: "Numeric concentration of the primary dopant/alloy element (no units here)"
+
+  - name: dopant_concentration_unit
+    type: str
+    description: "Unit for dopant_concentration — exactly one of: ppm / wt% / at%"
+
+  - name: second_dopant_element
+    type: str
+    description: "Second dopant or alloying element symbol if present"
+
+  - name: second_dopant_concentration
+    type: float
+    description: "Concentration of the second element (numeric, no units)"
+
+  - name: second_dopant_concentration_unit
+    type: str
+    description: "Unit for second_dopant_concentration — exactly one of: ppm / wt% / at%"
+
+  - name: composition_string
+    type: str
+    description: "CALCULATE THIS: composition in pymatgen format, atomic fractions. 
+      Pure W: 'W1'. W with 3wt% Re: convert to at% first then write 'W0.982Re0.018'. 
+      W with 60ppm K: 'W0.99994K0.00006'. 
+      Always use atomic fractions not weight fractions. 
+      Always normalize so fractions sum to 1.0. 
+      Use element symbols exactly as in the periodic table."
+
+  - name: alloying_element_concentrations
+    type: str
+    description: "Concentrations of major alloying elements such as Cr, Ni, Mo, Nb, Ti, V, Co, etc., with element:value and units if available"
+
+  - name: trace_impurity_concentrations
+    type: str
+    description: "Trace impurity contents such as S, P, H, O, N, C, and similar elements, with concentrations and units if available"
+
+  - name: average_electronegativity
+    type: float
+    description: "Composition-derived average electronegativity or other weighted composition descriptor if reported"
+
+  - name: atomic_feature_descriptors
+    type: str
+    description: "Composition-derived elemental descriptors such as average atomic radius, valence, or other atomic-scale features"
+
+  # ── PROCESSING ──────────────────────────────────────────────────────────────
+  - name: processing_history
+    type: str
+    description: "Full processing route in standardised format (see domain rules)"
+
+  - name: deformation_process
+    type: str
+    description: "Primary deformation method, e.g. 'cold_rolling', 'rotary_swaging'"
+
+  - name: starting_material
+    type: str
+    description: "Form of the starting material, e.g. 'sintered ingot', 'arc-melted button'"
+
+  - name: deformation_temperature_K
+    type: float
+    unit: K
+    description: "Temperature during primary deformation step, in Kelvin"
+
+  - name: logarithmic_strain
+    type: float
+    description: "Total accumulated true (logarithmic) strain. Calculate from reduction if not stated."
+
+  - name: cumulative_true_strain
+    type: float
+    description: "Cumulative true strain if separately reported from logarithmic_strain"
+
+  - name: degree_of_cold_rolling
+    type: float
+    unit: "%"
+    description: "Total cold-rolling reduction in % if explicitly reported"
+
+  - name: recrystallization_temp_K
+    type: float
+    unit: K
+    description: "Recrystallization onset or annealing temperature in Kelvin"
+
+  # ── MICROSTRUCTURE ──────────────────────────────────────────────────────────
+  - name: grain_size_L_um
+    type: float
+    unit: um
+    description: "Grain size in the longitudinal / rolling direction (RD/LD) in micrometres"
+
+  - name: grain_size_T_um
+    type: float
+    unit: um
+    description: "Grain size in the transverse direction (TD) in micrometres"
+
+  - name: grain_size_S_um
+    type: float
+    unit: um
+    description: "Grain size in the short-transverse / normal direction (ND) in micrometres"
+
+  - name: grain_size_L_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_L_um"
+
+  - name: grain_size_T_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_T_um"
+
+  - name: grain_size_S_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_S_um"
+
+  - name: grain_boundary_area_to_volume_per_um
+    type: float
+    unit: "um^-1"
+    description: "CALCULATED: 1/L + 1/T + 1/S (see domain rules). Never null if grain sizes known."
+
+  - name: grain_size_estimated_dimensions
+    type: str
+    description: "Dimensionality of reported grain size — exactly one of: none / partial / x_y_estimated / single_direction_only / reported_as_D10_D50_D90_distribution_not_xyz"
+
+  - name: grain_aspect_ratio
+    type: float
+    description: "Grain aspect ratio (longest / shortest axis), if reported"
+
+  - name: grain_morphology_qualitative
+    type: str
+    description: "Qualitative grain shape description, e.g. 'pancake', 'equiaxed', 'elongated', 'fibrous'"
+
+  - name: grain_size_distribution
+    type: str
+    description: "Spread or uniformity of grain sizes, e.g. 'narrow', 'bimodal', 'broad'"
+
+  - name: crystallographic_texture
+    type: str
+    description: "Preferred orientation or texture of the grains, e.g. 'strong <001> fiber texture'"
+
+  - name: grain_boundary_CSL_fraction_pct
+    type: float
+    unit: "%"
+    description: "Fraction of coincidence-site-lattice (CSL) special grain boundaries, in %"
+
+  - name: twin_fraction_pct
+    type: float
+    unit: "%"
+    description: "Twin boundary density or twin fraction, in %"
+
+  - name: persistent_slip_band_density
+    type: str
+    description: "Persistent slip band (PSB) density or prevalence, e.g. 'low', 'moderate', 'high'"
+
+  - name: phase_type_and_volume_fraction
+    type: str
+    description: "Constituent phase names and their volume fractions, e.g. 'ferrite 80%, martensite 20%'"
+
+  - name: precipitate_size_distribution
+    type: str
+    description: "Second-phase precipitate size and spatial distribution, if present"
+
+  - name: inclusion_content_distribution
+    type: str
+    description: "Non-metallic inclusion content and distribution, e.g. oxides/sulfides"
+
+  - name: kam_local_misorientation_deg
+    type: float
+    unit: deg
+    description: "Kernel average misorientation (KAM) or local misorientation, in degrees"
+
+  - name: dislocation_structure_description
+    type: str
+    description: "Description of dislocation structures such as stacking faults, planar arrays, tangles, or cell walls"
+
+  - name: stacking_fault_energy_mJ_m2
+    type: float
+    unit: "mJ/m^2"
+    description: "Stacking fault energy (SFE) in mJ/m^2"
+
+  - name: pre_existing_dislocation_density_m2
+    type: float
+    unit: "m^-2"
+    description: "Pre-existing dislocation density in m^-2. Ensure correct unit conversion (see domain rules)."
+
+  - name: dislocation_density_method
+    type: str
+    description: "Method used to measure dislocation density, e.g. 'EBSD', 'TEM', 'XRD line broadening'"
+
+  - name: mobile_dislocation_fraction_pct
+    type: float
+    unit: "%"
+    description: "Fraction of dislocations considered mobile, in %"
+
+  
+  # ── MECHANICAL PROPERTIES ────────────────────────────────────────────────────
+  - name: measurement_method
+    type: str
+    description: "Test type used, e.g.  'tensile', 'LCF' "
+
+  - name: elastic_modulus_GPa
+    type: float
+    unit: GPa
+    description: "Young's modulus in GPa"
+
+  - name: UTS_MPa
+    type: float
+    unit: MPa
+    description: "Ultimate tensile strength in MPa"
+
+  - name: yield_strength_MPa
+    type: float
+    unit: MPa
+    description: "0.2% offset yield strength in MPa"
+
+  - name: fracture_strength_MPa
+    type: float
+    unit: MPa
+    description: "Fracture strength (stress at failure) in MPa, if distinct from UTS"
+
+  - name: total_elongation_pct
+    type: float
+    unit: "%"
+    description: "Total elongation at fracture in %"
+
+  - name: mechanical_property_test_temp_K
+    type: float
+    unit: K
+    description: "Temperature at which mechanical properties were measured, in Kelvin"
+
+  - name: hardness_HV
+    type: float
+    unit: HV
+    description: "Vickers hardness value"
+
+  - name: hardness_HV_error_plus_or_minus
+    type: float
+    unit: HV
+    description: "±error on the hardness value"
+
+  - name: hardness_HV_test_load_kgf
+    type: float
+    unit: kgf
+    description: "Test load for Vickers hardness, in kgf (e.g. 0.1 for HV0.1)"
+
+  - name: hardness_HV_direction
+    type: str
+    description: "Direction of hardness indentation relative to grain, e.g. 'transversal_direction', 'normal_direction'"
+
+  - name: loading_direction_relative_to_grain
+    type: str
+    description: "Relationship between loading/crack propagation and grain elongation (see domain rules)"
+
+  - name: notch_fabrication_method
+    type: str
+    description: "How the notch was made, e.g. 'electrical discharge machining', 'razor blade'"
+
+  - name: loading_rate_or_strain_rate
+    type: str
+    description: "Loading or strain rate, including units, e.g. '1 MPa m^0.5 s^-1', '10^-3 s^-1'"
+
+  - name: monotonic_elongation_pct
+    type: float
+    unit: "%"
+    description: "Monotonic ductility or elongation at fracture in %"
+
+  - name: hardness_HB
+    type: float
+    unit: HB
+    description: "Brinell hardness value if reported"
+
+  - name: electrical_conductivity_S_per_m
+    type: float
+    unit: "S/m"
+    description: "Electrical conductivity measured by four-point probe or equivalent method"
+
+  - name: electrical_resistivity_ohm_m
+    type: float
+    unit: "Ω·m"
+    description: "Electrical resistivity if conductivity is not reported"
+
+  # ── SURFACE CHARACTERIZATION ──────────────────────────────────────────────
+  - name: surface_roughness_Ra_um
+    type: float
+    unit: um
+    description: "Average surface roughness Ra in micrometres"
+
+  - name: surface_roughness_Rz_um
+    type: float
+    unit: um
+    description: "Surface roughness depth parameter such as Rz or valley depth in micrometres"
+
+  - name: surface_topography_parameters
+    type: str
+    description: "Surface topography or optical microscopy parameters such as waviness, valley depth, or profile descriptors"
+
+  - name: residual_stress_MPa
+    type: float
+    unit: MPa
+    description: "Near-surface residual stress magnitude in MPa"
+
+  - name: residual_stress_sign
+    type: str
+    description: "Sign of residual stress, e.g. 'compressive' or 'tensile'"
+
+  # ── LOW-CYCLE FATIGUE ─────────────────────────────────────────────────────
+  - name: fatigue_standard
+    type: str
+    description: "Fatigue test standard if reported, e.g. 'ISO 12106', 'ASTM E606'"
+
+  - name: fatigue_ductility_coefficient
+    type: float
+    description: "Coffin-Manson fatigue ductility coefficient, often denoted as ε_f' or C_f"
+
+  - name: fatigue_ductility_exponent
+    type: float
+    description: "Coffin-Manson fatigue ductility exponent, often denoted as c"
+
+  - name: stress_amplitude_MPa
+    type: float
+    unit: MPa
+    description: "Applied cyclic stress amplitude in MPa"
+
+  - name: stress_ratio_R
+    type: float
+    description: "Stress ratio R = minimum/maximum stress if reported"
+
+  - name: loading_frequency_Hz
+    type: float
+    unit: Hz
+    description: "Loading frequency in Hz"
+
+  - name: loading_type
+    type: str
+    description: "Loading mode such as axial, bending, torsional, or multiaxial"
+
+  - name: fatigue_test_temperature_K
+    type: float
+    unit: K
+    description: "Operating or test temperature during low-cycle fatigue testing in Kelvin"
+
+  # ── SPECIMEN ─────────────────────────────────────────────────────────────────
+  - name: specimen_form
+    type: str
+    description: "Form of the specimen, e.g. 'plate', 'rod', 'sheet', 'disc'"
+
+  - name: specimen_thickness_mm
+    type: float
+    unit: mm
+    description: "Specimen thickness in mm"
+
+  - name: specimen_diameter_mm
+    type: float
+    unit: mm
+    description: "Specimen diameter in mm (for round bar or disc specimens)"
+
+  # ── PROVENANCE ───────────────────────────────────────────────────────────────
+  - name: source_DOI
+    type: str
+    description: "DOI of the paper being extracted — always fill this"
+
+  - name: source_figure_or_table
+    type: str
+    description: "Specific figure or table each value was extracted from, e.g. 'Table 2, Fig.3a'"
+
+  - name: data_from_reference
+    type: list[str]
+    description: "Reference numbers that are the SOURCE of data points in this record (not background citations). Only fill if authors explicitly say data comes from another work. Example: [\"[5]\", \"[8]\"]"
+
+  - name: reference_titles
+    type: list[str]
+    description: "Author-year strings matching entries in data_from_reference, in the same order. Example: [\"Smith 2019\", \"Jones et al. 2021\"]"
+
+  - name: notes
+    type: str
+    description: "All uncertainties, methodology caveats, and derived values. Use tags: [methodology] [grain_size_methodology] [graph_read] [derived] [scope_caveat] [finding]"

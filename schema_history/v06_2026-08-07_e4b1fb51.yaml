@@ -1,0 +1,571 @@
+# =============================================================================
+# COPPER PROJECT SCHEMA
+# Literature extraction for Cu and Cu-based alloys: composition & strengthening,
+# processing, microstructure, and mechanical / functional test results.
+#
+# THREE TOP-LEVEL SECTIONS (see why they are separate: fields = 1:1 scalar
+# attributes of the material-condition; tests / characterization = nested
+# sub-objects, present-or-absent as a unit, with their own scoped fields):
+#   fields          - flat material layer, one record per material-CONDITION
+#   tests           - nested; one block per mechanical/functional test
+#   characterization- nested; one block per observation method
+# Loader: `fields` -> top-level model fields; each block -> optional sub-model.
+# =============================================================================
+
+project: copper
+material_system: "Copper (Cu) and Cu-based alloys"
+record_id_prefix: "Cu"
+
+# -----------------------------------------------------------------------------
+# DOMAIN RULES  (injected verbatim into the extraction prompt)
+# -----------------------------------------------------------------------------
+domain_rules: |
+  GLOBAL EXTRACTION GUARD (applies to every field):
+  - Extract ONLY values explicitly stated in, or directly read from, the paper.
+    Never infer, estimate, or fill a value from typical/textbook knowledge.
+  - Leave a field null if the paper does not provide it.
+  - The ONLY fields you may compute are those marked CALCULATE, and only from
+    other fields you extracted in THIS record: composition_string,
+    grain_boundary_area_to_volume_per_um, and equivalent_true_strain.
+
+  UNIT CONVENTIONS (apply everywhere):
+  - Temperatures in Kelvin: K = C + 273.15; "RT"/"room temperature" ~= 293 K.
+  - Hold times in MINUTES: convert hours (4 h -> 240) and note the original in `notes`.
+  - Concentrations use the field's stated unit (ppm / wt% / at%); if the paper uses
+    another basis, convert and note the original in `notes`.
+
+  COMPOSITION & STRENGTHENING:
+  - strengthening_mechanism (AS STATED by the authors) — exactly one of:
+    commercially_pure / solid_solution / precipitation / spinodal / dispersion / other.
+    Leave null if not stated; do NOT infer it from the composition. The composition
+    pattern each mechanism produces (for the pipeline's later inference, NOT for you to guess):
+      * commercially_pure — no intentional additions.
+      * solid_solution    — one substantial solute in solution (Cu-Zn, Cu-Sn, Cu-Ni);
+                            primary large, secondary usually absent.
+      * precipitation     — dilute aged solutes (Cu-Cr, Cu-Cr-Zr, Cu-Be, Cu-Ni-Si);
+                            primary >> secondary, both small.
+      * spinodal          — two comparable substantial co-additions (Cu-Ni-Sn);
+                            primary and secondary both large and similar.
+      * dispersion        — inert compound particles in a near-pure matrix; use
+                            dispersoid_phase, not the element slots.
+  - Ordering rule: primary_addition_element is the intentional addition at the HIGHEST
+    concentration; secondary_addition_element is the next highest. If the paper mixes
+    wt% and at%, compare on the same basis before deciding the order.
+  - Element slots (primary / secondary / other) take element SYMBOLS only. Dispersoid
+    compounds (Al2O3, Y2O3) go in dispersoid_phase; ODS content is often in vol%.
+  - primary_addition_unit and secondary_addition_unit are each exactly one of: ppm / wt% / at%.
+  - Known element symbols in this project: Cu, Ag, Al, Si, Zn, Sn, Ni, Co, Mn, Mg, Fe,
+    Cr, P, Pb, Sb, Bi, Ti, Zr, W, Nb, Ta, Li, Cd, S, Be, O, C, N, Te.
+
+  COMPOSITION STRING (CALCULATE):
+  - Convert all concentrations to atomic fractions, then format as element+fraction pairs
+    with no spaces, normalised to sum 1.0, e.g. "Cu0.991Cr0.007Zr0.002". Pure Cu = "Cu1".
+    Trace dopants at ppm are included, e.g. "Cu0.99994Ti0.00006".
+  - Represents the METALLIC MATRIX only — exclude dispersoid compounds (an ODS Cu-Al2O3
+    is "Cu1", with the Al2O3 recorded in dispersoid_phase), so it does not pollute the
+    Materials Project query.
+  - Use element symbols exactly as in the periodic table. Never leave null if the
+    composition and concentrations are known.
+
+  CALCULATED DESCRIPTORS — DO NOT CALCULATE, leave null:
+  - VEC, delta_H_mix_kJ_mol, delta_S_mix_J_mol_K, delta_atomic_size are computed later by
+    the feature pipeline from the composition fields you extracted. Do not compute them here.
+
+  PROCESSING:
+  - deformation_process (REQUIRED) — exactly one of: none / cold_rolling / hot_rolling /
+    warm_rolling / rotary_swaging / drawing / extrusion / forging / ECAP / HPT /
+    spark_plasma_sintering / sintering / other. "none" = no deformation (as-cast or only heat-treated).
+  - material_condition — exactly one of: as_cast / annealed / recrystallized / cold_worked /
+    solution_treated / solution_treated_and_aged / severe_plastic_deformation / other.
+    Qualitative state only; the AMOUNT of cold work is equivalent_true_strain. Independent
+    of strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
+  - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
+    The fields below are the parsed values pulled out of it.
+    Example: "solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h".
+  - equivalent_true_strain (CALCULATE if not stated directly): total imposed von Mises
+    EQUIVALENT true strain, comparable across all deformation modes.
+      * rolling / drawing / swaging / extrusion: eps = ln(1/(1 - total_reduction)), reduction as a fraction (50% -> 0.50).
+      * multi-pass: sum the per-pass strains, eps = n * ln(1/(1 - r_per_pass)).
+      * ECAP: about 1.15 per pass for a 90-degree die (Iwahashi equation); total = n * per-pass.
+      * HPT / other SPD: use the standard process formula and record the geometric inputs
+        (turns, radius, thickness, die angle) in processing_parameters.
+    Do NOT keep separate "logarithmic" and "cumulative" strains — this one field replaces both.
+  - total_reduction_pct: total thickness/area reduction as REPORTED, in % (the raw input to the strain).
+  - number_of_passes: number of deformation passes/steps, if reported.
+  - strain_rate_per_s: deformation strain rate in s^-1, if reported.
+  - processing_parameters: process-SPECIFIC parameters not captured above, as key:value pairs
+    with units, per deformation_process. Free text; null if none.
+    Examples — ECAP: "route=Bc; die_angle=90deg; back_pressure=0MPa";
+    rotary_swaging: "per_pass_reduction=15%; die=4-jaw";
+    spark_plasma_sintering: "pressure=50MPa; dwell=5min; heating_rate=100C/min".
+  - deformation_temperature_K is a WORKING temperature and belongs to processing. TEST
+    temperatures (tensile, LCF, etc.) are NOT processing — they live inside each test block.
+
+  HEAT TREATMENTS (a temperature is meaningless without its step and its time — always pair them):
+  - Record standard steps in the named pairs: solution_treatment_temp_K / _time_min,
+    aging_temp_K / _time_min, anneal_recrystallization_temp_K / _time_min.
+  - Non-standard or multi-step schedules (step-ageing, step-quench, duplex anneals) go in
+    heat_treatment_steps as ordered "step:temp:time:cooling" entries.
+  - aging_temp_K / aging_time_min are the most important for precipitation and spinodal
+    alloys — always capture both when an ageing treatment is described.
+
+  GRAIN SIZE:
+  - grain_size_L_um = longitudinal/rolling (RD/LD); grain_size_T_um = transverse (TD);
+    grain_size_S_um = short-transverse/normal (ND, thickness). Match the paper's x/y/z to
+    L/T/S from its stated rolling/forging geometry.
+  - grain_boundary_area_to_volume_per_um (CALCULATE) = 1/L + 1/T + 1/S from the grain sizes.
+    Never null if L/T/S are known.
+  - grain_size_estimated_dimensions — exactly one of: none / partial / x_y_estimated /
+    single_direction_only / reported_as_D10_D50_D90_distribution_not_xyz.
+
+  DISLOCATION DENSITY:
+  - dislocation_density_m2: units m^-2 (convert cm^-2 x 1e4; 1e7 cm^-2 = 1e11 m^-2). Report the
+    paper's value for the as-processed (pre-test) material. Heavily deformed metals are often
+    ~1e10 to 1e14 m^-2, but NEVER fill from this range — record only a stated value.
+  - dislocation_structure_description: the observed arrangement (cell walls, tangles, planar
+    arrays, veins, stacking faults, twins, etc.).
+  - dislocation_density_method — one of: XRD_line_profile / EBSD_KAM / TEM / etch_pit.
+
+  LOADING DIRECTION:
+  - loading_direction_relative_to_grain (inside each test block): the relationship between
+    loading / crack propagation and grain elongation, e.g. "along_L", "along_S", "L-T crack system".
+
+  TESTS & CHARACTERIZATION:
+  - A test or characterization block is null unless that method was performed; fill a result
+    only if the paper reports it for THIS material-condition (the presence of the block is the
+    record that the test was run — there is no separate method field).
+  - Microstructure quantities stay in the material layer; tag their source with the *_method
+    fields (grain_size_method, texture_method, phase_fraction_method, dislocation_density_method).
+
+# -----------------------------------------------------------------------------
+# MATERIAL LAYER  (flat scalar attributes; one record per material-condition)
+# -----------------------------------------------------------------------------
+fields:
+
+  # ── IDENTITY ────────────────────────────────────────────────────────────────
+  - name: record_id
+    type: str
+    description: "Leave null — assigned manually in Excel"
+  - name: material_name
+    type: str
+    description: "Material name, e.g. 'pure Cu', 'Cu-Zn', 'Cu-3wt%P', 'Cu-0.1wt%Ti'"
+  - name: commercial_grade_name
+    type: str
+    description: "Commercial or proprietary grade name, e.g. 'Glidcop-AL15', 'AMPCOLOY 944', 'C18150'"
+
+  # ── COMPOSITION & STRENGTHENING ──────────────────────────────────────────────
+  - name: strengthening_mechanism
+    type: str
+    description: "Primary strengthening mechanism AS STATED — one of: commercially_pure /
+      solid_solution / precipitation / spinodal / dispersion / other. Null if not stated;
+      do NOT infer from composition. If several, choose the dominant one and note others in `notes`."
+  - name: base_material_purity_pct
+    type: float
+    unit: wt%
+    description: "Cu (base metal) purity in wt%, e.g. 99.97. Typically for commercially pure grades."
+  - name: trace_impurities
+    type: str
+    description: "Per-element UNINTENTIONAL impurities as element:value pairs with units,
+      e.g. 'O:5ppm, Fe:10ppm, S:3ppm'. Not intentional alloying additions."
+  - name: primary_addition_element
+    type: str
+    description: "Element SYMBOL of the intentional addition at the HIGHEST concentration,
+      e.g. 'Zn', 'Cr', 'Ni', 'Be'. Not a compound (dispersoids go in dispersoid_phase)."
+  - name: primary_addition_concentration
+    type: float
+    description: "Numeric concentration of primary_addition_element (no units here)."
+  - name: primary_addition_unit
+    type: str
+    description: "Unit for primary_addition_concentration — exactly one of: ppm / wt% / at%."
+  - name: secondary_addition_element
+    type: str
+    description: "Element SYMBOL of the intentional addition at the NEXT-highest concentration,
+      if any, e.g. 'Zr' in Cu-Cr-Zr, 'Sn' in Cu-Ni-Sn."
+  - name: secondary_addition_concentration
+    type: float
+    description: "Numeric concentration of secondary_addition_element (no units here)."
+  - name: secondary_addition_unit
+    type: str
+    description: "Unit for secondary_addition_concentration — exactly one of: ppm / wt% / at%."
+  - name: other_additions
+    type: str
+    description: "Further intentional alloying elements beyond primary/secondary, as
+      element:value pairs with units, e.g. 'Si:0.6wt%, Mg:0.1wt%'. Null if none."
+  - name: dispersoid_phase
+    type: str
+    description: "Inert dispersed second-phase COMPOUND (ODS), e.g. 'Al2O3', 'Y2O3'.
+      Distinct from an aged precipitate. Null unless present."
+  - name: dispersoid_content
+    type: float
+    description: "Numeric content of dispersoid_phase (no units here)."
+  - name: dispersoid_content_unit
+    type: str
+    description: "Unit for dispersoid_content — exactly one of: vol% / wt% / at%."
+  - name: composition_string
+    type: str
+    description: "CALCULATE: pymatgen-style, atomic fractions, matrix only (see domain rules).
+      E.g. 'Cu1', 'Cu0.991Cr0.007Zr0.002'. Never null if composition is known."
+
+  # ── PROCESSING ───────────────────────────────────────────────────────────────
+  - name: processing_history
+    type: str
+    description: "Full processing route, verbatim — the raw record the fields below are parsed from."
+  - name: material_condition
+    type: str
+    description: "Temper/condition — one of: as_cast / annealed / recrystallized / cold_worked /
+      solution_treated / solution_treated_and_aged / severe_plastic_deformation / other."
+  - name: deformation_process
+    type: str
+    description: "REQUIRED — one of: none / cold_rolling / hot_rolling / warm_rolling /
+      rotary_swaging / drawing / extrusion / forging / ECAP / HPT /
+      spark_plasma_sintering / sintering / other."
+  - name: deformation_temperature_K
+    type: float
+    unit: K
+    description: "Temperature during the primary deformation step ('RT' ~= 293 K)."
+  - name: equivalent_true_strain
+    type: float
+    description: "CALCULATE: total von Mises equivalent true strain (see domain rules)."
+  - name: total_reduction_pct
+    type: float
+    unit: "%"
+    description: "Total thickness/area reduction as reported (raw input to the strain)."
+  - name: number_of_passes
+    type: float
+    description: "Number of deformation passes/steps, if reported."
+  - name: strain_rate_per_s
+    type: float
+    unit: "s^-1"
+    description: "Deformation strain rate, if reported."
+  - name: processing_parameters
+    type: str
+    description: "Process-specific parameters as key:value with units, per deformation_process.
+      E.g. ECAP 'route=Bc; die_angle=90deg'; SPS 'pressure=50MPa; dwell=5min'. Null if none."
+  - name: solution_treatment_temp_K
+    type: float
+    unit: K
+    description: "Solution-treatment temperature, if performed."
+  - name: solution_treatment_time_min
+    type: float
+    unit: min
+    description: "Solution-treatment hold time (paired with the temperature above)."
+  - name: aging_temp_K
+    type: float
+    unit: K
+    description: "Ageing temperature, if performed (key for precipitation/spinodal alloys)."
+  - name: aging_time_min
+    type: float
+    unit: min
+    description: "Ageing hold time (paired with aging_temp_K)."
+  - name: anneal_recrystallization_temp_K
+    type: float
+    unit: K
+    description: "Annealing or recrystallization temperature, if performed."
+  - name: anneal_recrystallization_time_min
+    type: float
+    unit: min
+    description: "Annealing/recrystallization hold time (paired with the temperature above)."
+  - name: heat_treatment_steps
+    type: str
+    description: "Non-standard/multi-step thermal schedule not captured above, as ordered
+      'step:temp:time:cooling' entries. Null if none."
+
+  # ── MICROSTRUCTURE: grain structure ──────────────────────────────────────────
+  - name: grain_size_L_um
+    type: float
+    unit: um
+    description: "Grain size in the longitudinal/rolling direction (RD/LD), um"
+  - name: grain_size_T_um
+    type: float
+    unit: um
+    description: "Grain size in the transverse direction (TD), um"
+  - name: grain_size_S_um
+    type: float
+    unit: um
+    description: "Grain size in the short-transverse/normal direction (ND), um"
+  - name: grain_size_L_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_L_um"
+  - name: grain_size_T_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_T_um"
+  - name: grain_size_S_sd_um
+    type: float
+    unit: um
+    description: "Standard deviation of grain_size_S_um"
+  - name: grain_size_estimated_dimensions
+    type: str
+    description: "Which directions were reported — one of: none / partial / x_y_estimated /
+      single_direction_only / reported_as_D10_D50_D90_distribution_not_xyz"
+  - name: grain_boundary_area_to_volume_per_um
+    type: float
+    unit: "um^-1"
+    description: "CALCULATE: 1/L + 1/T + 1/S. Never null if L/T/S known."
+  - name: grain_aspect_ratio
+    type: float
+    description: "Grain aspect ratio (longest/shortest axis), if reported"
+  - name: grain_morphology_qualitative
+    type: str
+    description: "Grain shape, e.g. 'equiaxed', 'elongated', 'pancake', 'fibrous'"
+  - name: grain_size_distribution
+    type: str
+    description: "Spread/uniformity, e.g. 'narrow', 'bimodal', 'broad'"
+  - name: crystallographic_texture
+    type: str
+    description: "Texture, e.g. 'strong {110}<001> Goss', 'weak cube'"
+  - name: grain_size_method
+    type: str
+    description: "Source of grain size — one of: optical / SEM / EBSD / TEM"
+  - name: texture_method
+    type: str
+    description: "Source of texture — one of: EBSD / XRD"
+  - name: phase_fraction_method
+    type: str
+    description: "Source of phase fractions — one of: SEM / EBSD / XRD"
+
+  # ── MICROSTRUCTURE: grain boundary character ────────────────────────────────
+  - name: grain_boundary_CSL_fraction_pct
+    type: float
+    unit: "%"
+    description: "Fraction of CSL special boundaries, %"
+  - name: twin_fraction_pct
+    type: float
+    unit: "%"
+    description: "Twin boundary fraction, % (annealing twins are common in Cu)"
+
+  # ── MICROSTRUCTURE: second-phase constituents (OBSERVED) ────────────────────
+  - name: phase_type_and_volume_fraction
+    type: str
+    description: "Observed phases and volume fractions, e.g. 'alpha-Cu + 5% Cr', 'alpha + beta brass 60/40'"
+  - name: precipitate_size_distribution
+    type: str
+    description: "Observed precipitate size and spatial distribution, if present"
+  - name: inclusion_content_distribution
+    type: str
+    description: "Non-metallic inclusion content/distribution, e.g. oxides (Cu2O), sulfides (MnS)"
+
+  # ── MICROSTRUCTURE: defect & dislocation structure ──────────────────────────
+  - name: dislocation_density_m2
+    type: float
+    unit: "m^-2"
+    description: "Dislocation density of the as-processed (pre-test) material, m^-2 (see domain rules)"
+  - name: dislocation_density_method
+    type: str
+    description: "Source — one of: XRD_line_profile / EBSD_KAM / TEM / etch_pit"
+  - name: dislocation_structure_description
+    type: str
+    description: "Observed arrangement, e.g. 'cell walls', 'tangles', 'planar arrays', 'veins'"
+  - name: kam_local_misorientation_deg
+    type: float
+    unit: deg
+    description: "Kernel average misorientation (KAM), proxy for local stored strain / GND density, deg"
+  - name: persistent_slip_band_density
+    type: str
+    description: "PSB prevalence, e.g. 'low', 'moderate', 'high' (fatigue-relevant)"
+  - name: mobile_dislocation_fraction_pct
+    type: float
+    unit: "%"
+    description: "Fraction of dislocations considered mobile, % (rarely reported; often null)"
+
+  # ── SURFACE CHARACTERIZATION ─────────────────────────────────────────────────
+  - name: surface_roughness_Ra_um
+    type: float
+    unit: um
+    description: "Average surface roughness Ra, um"
+  - name: surface_roughness_Rz_um
+    type: float
+    unit: um
+    description: "Surface roughness depth Rz, um"
+  - name: surface_topography_parameters
+    type: str
+    description: "Other topography descriptors (waviness, valley depth, profile), if given"
+  - name: residual_stress_MPa
+    type: float
+    unit: MPa
+    description: "Near-surface residual stress magnitude, MPa"
+  - name: residual_stress_sign
+    type: str
+    description: "Sign — 'compressive' or 'tensile'"
+  - name: residual_stress_method
+    type: str
+    description: "Source — one of: XRD_sin2psi / hole_drilling / neutron_diffraction / other"
+
+  # ── PROVENANCE ───────────────────────────────────────────────────────────────
+  - name: source_DOI
+    type: str
+    description: "DOI of the paper being extracted — always fill this"
+  - name: source_figure_or_table
+    type: str
+    description: "Figure/table each value came from, e.g. 'Table 2, Fig.3a'"
+  - name: data_from_reference
+    type: list[str]
+    description: "Reference numbers that are the SOURCE of data points (not background citations).
+      Only if authors say data comes from another work. Example: [\"[5]\", \"[8]\"]"
+  - name: reference_titles
+    type: list[str]
+    description: "Author-year strings matching data_from_reference, same order. Example: [\"Smith 2019\"]"
+  - name: notes
+    type: str
+    description: "Uncertainties, methodology caveats, unit conversions, derived values.
+      Tags: [methodology] [grain_size_methodology] [graph_read] [derived] [unit_converted] [scope_caveat] [finding]"
+
+# -----------------------------------------------------------------------------
+# MECHANICAL / FUNCTIONAL TEST BLOCKS  (nested; null if not run)
+# Each key is a test; its value nests conditions / specimen / results.
+# -----------------------------------------------------------------------------
+tests:
+
+  tensile:
+    conditions:
+      - {name: test_temperature_K, type: float, unit: K, description: "Test temperature, K ('RT' ~= 293 K)"}
+      - {name: strain_rate_per_s, type: float, unit: "s^-1", description: "Applied strain rate, s^-1"}
+      - {name: loading_direction_relative_to_grain, type: str, description: "Loading vs grain, e.g. 'along_L', 'along_S', 'L-T'"}
+    specimen:
+      - {name: specimen_form, type: str, description: "One of: round / flat / sheet / other"}
+      - {name: specimen_diameter_mm, type: float, unit: mm, description: "Gauge diameter (round)"}
+      - {name: specimen_thickness_mm, type: float, unit: mm, description: "Gauge thickness (flat/sheet)"}
+      - {name: specimen_width_mm, type: float, unit: mm, description: "Gauge width (flat/sheet)"}
+      - {name: gauge_length_mm, type: float, unit: mm, description: "Gauge length"}
+    results:
+      - {name: youngs_modulus_GPa, type: float, unit: GPa, description: "Young's modulus, GPa; only if reported"}
+      - {name: yield_strength_MPa, type: float, unit: MPa, description: "0.2% offset yield strength, MPa"}
+      - {name: UTS_MPa, type: float, unit: MPa, description: "Ultimate tensile strength, MPa"}
+      - {name: fracture_strength_MPa, type: float, unit: MPa, description: "Fracture strength, MPa, if distinct from UTS"}
+      - {name: elongation_at_fracture_pct, type: float, unit: "%", description: "Total elongation at fracture, %"}
+      - {name: reduction_of_area_pct, type: float, unit: "%", description: "Reduction of area at fracture, %, if reported"}
+
+  compression:
+    conditions:
+      - {name: test_temperature_K, type: float, unit: K, description: "Test temperature, K"}
+      - {name: strain_rate_per_s, type: float, unit: "s^-1", description: "Applied strain rate, s^-1"}
+      - {name: loading_direction_relative_to_grain, type: str, description: "Loading vs grain, e.g. 'along_L', 'along_S'"}
+    specimen:
+      - {name: specimen_form, type: str, description: "One of: cylinder / cube / other"}
+      - {name: specimen_diameter_mm, type: float, unit: mm, description: "Diameter (cylindrical)"}
+      - {name: specimen_height_mm, type: float, unit: mm, description: "Height of the specimen"}
+    results:
+      - {name: compressive_yield_strength_MPa, type: float, unit: MPa, description: "0.2% offset compressive yield strength, MPa"}
+      - {name: compressive_strength_MPa, type: float, unit: MPa, description: "Max compressive strength, MPa, if reported"}
+
+  hardness:
+    conditions:
+      - {name: test_temperature_K, type: float, unit: K, description: "Test temperature, K (usually RT)"}
+      - {name: indentation_direction_relative_to_grain, type: str, description: "Indentation plane vs grain, e.g. 'transverse', 'normal'"}
+    specimen: []
+    results:
+      - {name: hardness_scale, type: str, description: "One of: HV / HB / HRB / other"}
+      - {name: hardness_value, type: float, description: "Hardness number on hardness_scale"}
+      - {name: hardness_error_plus_minus, type: float, description: "± error on the value, if reported"}
+      - {name: test_load_kgf, type: float, unit: kgf, description: "Indentation load, kgf (e.g. 0.1 for HV0.1)"}
+
+  electrical:
+    conditions:
+      - {name: test_temperature_K, type: float, unit: K, description: "Measurement temperature, K (usually RT)"}
+      - {name: method, type: str, description: "One of: four_point_probe / eddy_current / van_der_pauw / other"}
+    specimen: []
+    results:
+      - {name: electrical_conductivity_pct_IACS, type: float, unit: "%IACS", description: "Conductivity as reported in %IACS (usual Cu convention)"}
+      - {name: electrical_conductivity_S_per_m, type: float, unit: "S/m", description: "Conductivity in SI; 100% IACS = 5.8001e7 S/m"}
+      - {name: electrical_resistivity_ohm_m, type: float, unit: "ohm.m", description: "Resistivity, ohm.m, if conductivity not reported"}
+
+  lcf:
+    conditions:
+      - {name: fatigue_standard, type: str, description: "e.g. 'ISO 12106', 'ASTM E606'"}
+      - {name: test_temperature_K, type: float, unit: K, description: "Test temperature, K ('RT' ~= 293 K)"}
+      - {name: control_mode, type: str, description: "One of: total_strain / plastic_strain / stress"}
+      - {name: strain_ratio_R, type: float, description: "Strain ratio R_eps = eps_min/eps_max (usually -1)"}
+      - {name: loading_mode, type: str, description: "One of: axial / bending / torsional / multiaxial"}
+      - {name: waveform, type: str, description: "e.g. 'triangular', 'sinusoidal'"}
+      - {name: frequency_Hz, type: float, unit: Hz, description: "Cycling frequency, Hz"}
+    specimen:
+      - {name: specimen_form, type: str, description: "One of: cylindrical / hourglass / flat / other"}
+      - {name: specimen_gauge_diameter_mm, type: float, unit: mm, description: "Gauge diameter"}
+      - {name: specimen_gauge_length_mm, type: float, unit: mm, description: "Gauge length"}
+    results:
+      - {name: cyclic_response, type: str, description: "'hardening' / 'softening' / 'stable' / 'mixed'"}
+      - {name: fatigue_ductility_coefficient, type: float, description: "Coffin-Manson plastic coefficient eps_f'"}
+      - {name: fatigue_ductility_exponent, type: float, description: "Coffin-Manson plastic exponent c (negative)"}
+      - {name: fatigue_strength_coefficient_MPa, type: float, unit: MPa, description: "Basquin elastic coefficient sigma_f'"}
+      - {name: fatigue_strength_exponent, type: float, description: "Basquin elastic exponent b (negative)"}
+      - {name: cyclic_strength_coefficient_K_prime_MPa, type: float, unit: MPa, description: "Cyclic strength coefficient K'"}
+      - {name: cyclic_strain_hardening_exponent_n_prime, type: float, description: "Cyclic strain-hardening exponent n'"}
+      - {name: transition_fatigue_life_2Nt, type: float, description: "Transition reversals (elastic = plastic), if reported"}
+      - name: data_points
+        item_fields:
+        - {name: total_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: plastic_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: elastic_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: stress_amplitude_MPa, type: float, unit: MPa}
+        - {name: cycles_to_failure_Nf, type: float}
+        description: "Strain-life curve: one entry per tested amplitude. Every reported point; null if only constants given."
+
+# -----------------------------------------------------------------------------
+# CHARACTERIZATION BLOCKS  (nested; acquisition params + method-EXCLUSIVE outputs)
+# Shared microstructure quantities stay in the material layer with *_method tags.
+# -----------------------------------------------------------------------------
+characterization:
+
+  SEM:
+    conditions:
+      - {name: accelerating_voltage_kV, type: float, unit: kV, description: "Accelerating voltage, kV"}
+      - {name: signal, type: str, description: "One of: SE / BSE"}
+      - {name: eds_used, type: bool, description: "Whether EDS composition mapping was used"}
+    specimen:
+      - {name: examined_section, type: str, description: "e.g. 'L-T plane', 'fracture_surface'"}
+      - {name: surface_prep, type: str, description: "e.g. 'polished', 'etched'"}
+    results:
+      - {name: crack_initiation_site, type: str, description: "surface / subsurface / inclusion / pore / PSB / grain_boundary"}
+      - {name: fatigue_striation_spacing_um, type: float, unit: um, description: "Striation spacing, um"}
+      - {name: fracture_mode, type: str, description: "transgranular_dimple / cleavage / intergranular / mixed"}
+      - {name: secondary_features, type: str, description: "e.g. secondary cracks, inclusions at initiation"}
+
+  EBSD:
+    conditions:
+      - {name: step_size_um, type: float, unit: um, description: "Map step size, um"}
+      - {name: accelerating_voltage_kV, type: float, unit: kV, description: "Accelerating voltage, kV"}
+      - {name: map_area_um2, type: float, unit: "um^2", description: "Mapped area, um^2"}
+      - {name: indexing_rate_pct, type: float, unit: "%", description: "Indexing/hit rate, %"}
+    specimen:
+      - {name: examined_section, type: str, description: "e.g. 'L-T plane'"}
+    results:
+      - {name: HAGB_fraction_pct, type: float, unit: "%", description: "High-angle (>15deg) boundary fraction, %"}
+      - {name: LAGB_fraction_pct, type: float, unit: "%", description: "Low-angle boundary fraction, %"}
+      - {name: mean_misorientation_angle_deg, type: float, unit: deg, description: "Mean misorientation angle, deg"}
+      - {name: recrystallized_fraction_pct, type: float, unit: "%", description: "Recrystallized fraction, %"}
+      - {name: GND_density_m2, type: float, unit: "m^-2", description: "GND density from KAM, m^-2"}
+      - {name: texture_components, type: str, description: "e.g. 'Cube 4x, Copper 2x' (multiples of random)"}
+
+  XRD:
+    conditions:
+      - {name: radiation, type: str, description: "e.g. 'Cu_K_alpha'"}
+      - {name: scan_range_2theta, type: str, description: "2-theta range, e.g. '20-100 deg'"}
+      - {name: method, type: str, description: "Rietveld / Williamson_Hall / modified_Warren_Averbach / sin2psi"}
+    specimen:
+      - {name: examined_surface_or_section, type: str, description: "Surface/plane examined"}
+    results:
+      - {name: phases_identified, type: str, description: "Phases + Rietveld wt% if given"}
+      - {name: lattice_parameter_angstrom, type: float, unit: angstrom, description: "Lattice parameter, A"}
+      - {name: microstrain_rms_pct, type: float, unit: "%", description: "RMS microstrain, %"}
+      - {name: crystallite_size_nm, type: float, unit: nm, description: "Crystallite size, nm"}
+      - {name: dislocation_density_XRD_m2, type: float, unit: "m^-2", description: "Dislocation density from line broadening, m^-2"}
+      - {name: stacking_fault_probability, type: float, description: "Stacking fault probability, if reported"}
+
+  TEM:
+    conditions:
+      - {name: accelerating_voltage_kV, type: float, unit: kV, description: "Accelerating voltage, kV"}
+      - {name: mode, type: str, description: "One of: BF / DF / weak_beam / HRTEM / STEM"}
+    specimen:
+      - {name: foil_plane, type: str, description: "Foil orientation, e.g. 'L-T'"}
+      - {name: foil_prep, type: str, description: "e.g. 'electropolished', 'FIB'"}
+    results:
+      - {name: dislocation_density_TEM_m2, type: float, unit: "m^-2", description: "Dislocation density (weak-beam count), m^-2"}
+      - {name: precipitate_mean_size_nm, type: float, unit: nm, description: "Mean precipitate size, nm"}
+      - {name: precipitate_spacing_nm, type: float, unit: nm, description: "Inter-particle spacing, nm (Orowan)"}
+      - {name: precipitate_coherency, type: str, description: "coherent / semicoherent / incoherent"}
+      - {name: precipitate_phase_identified, type: str, description: "e.g. 'Cr', 'Cu5Zr', 'Ni2Si' (via SAED)"}
+      - {name: stacking_fault_energy_mJ_m2, type: float, unit: "mJ/m^2", description: "MEASURED SFE (node/ribbon/partial separation)"}
+      - {name: stacking_fault_width_nm, type: float, unit: nm, description: "Stacking fault / partial separation width, nm"}
+      - {name: twin_thickness_nm, type: float, unit: nm, description: "Deformation twin thickness, nm"}
+  

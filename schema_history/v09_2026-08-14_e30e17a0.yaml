@@ -22,19 +22,12 @@ record_id_prefix: "Cu"
 domain_rules: |
   GLOBAL EXTRACTION GUARD (applies to every field):
   - Extract ONLY values explicitly stated in, or directly read from, the paper.
-    Never infer, estimate, or fill a value from typical/textbook knowledge.
+    Never infer, estimate, or fill a value from typical/textbook knowledge. 
     Never calculate a value from other fields unless explicitly marked CALCULATE.
   - Leave a field null if the paper does not provide it.
   - The ONLY fields you may compute are those marked CALCULATE, and only from
     other fields you extracted in THIS record: composition_string,
     grain_boundary_area_to_volume_per_um, and equivalent_true_strain.
-
-  RECORD GRANULARITY (one record = one material-CONDITION worth a row):
-  - Create a record ONLY for a material-condition that has at least one reported
-    MEASUREMENT (a test or characterization result), or that the paper explicitly
-    analyses as a distinct endpoint. A transient intermediate processing state with
-    no measured data of its own is NOT its own record; it belongs inside
-    processing_history. Do NOT emit one row per processing step.
 
   UNIT CONVENTIONS (apply everywhere):
   - Temperatures in Kelvin: K = C + 273.15; "RT"/"room temperature" ~= 293 K.
@@ -59,17 +52,8 @@ domain_rules: |
   - Ordering rule: primary_addition_element is the intentional addition at the HIGHEST
     concentration; secondary_addition_element is the next highest. If the paper mixes
     wt% and at%, compare on the same basis before deciding the order.
-    If the paper does not explicitly state exact chemical composition or concentration,
-    do not use a vendor website to look up actual values, and do not invent numbers.
-    DESIGNATION-BASED COMPOSITION (exception): if the paper cites a standard alloy
-    designation (a UNS number, e.g. C18150, or an EN/DIN number), you MAY record that
-    grade's specified composition FROM THE STANDARD, as RANGES in the *_min / *_max
-    fields, and set composition_source to UNS_spec or EN_spec accordingly. Never collapse
-    a spec range into a single midpoint in the point-value field. A spec-derived composition
-    is nominal, NOT a measurement of this material, so it MUST be tagged via composition_source
-    so it is never mistaken for a measured value. Use the single point-value fields
-    (primary_/secondary_addition_concentration) only for a value the paper itself states,
-    with composition_source = paper_measured or paper_nominal.
+    If the paper does not explicitly state exact chemical composition or concentration, 
+    do not use the vendor website to see the actual values, do not take the average of the typical concentration range from standards.
   - Element slots (primary / secondary / other) take element SYMBOLS only. Dispersoid
     compounds (Al2O3, Y2O3) go in dispersoid_phase; ODS content is often in vol%.
   - primary_addition_unit and secondary_addition_unit are each exactly one of: ppm / wt% / at%.
@@ -103,7 +87,7 @@ domain_rules: |
     Null when no named technique applies (plain rolling, forging, drawing, etc.).
     Use a technique ONLY when the process has a defining geometry or route beyond mode+temperature.
     Decomposition rule:
-      * cryorolling    -> mode=rolling,    regime=cryogenic, technique=null  (no named technique; regime carries "cryo")
+      * cryorolling    -> mode=rolling,    regime=cryogenic, technique=conventional
       * ECAP           -> mode=extrusion,  technique=ECAP   (angular-channel shear ≠ mode+temp)
       * ARB            -> mode=rolling,     technique=ARB
       * rotary swaging -> mode=swaging,     technique=rotary_swaging
@@ -128,14 +112,10 @@ domain_rules: |
     processing_parameters. For an as-consolidated sample, deformation_mode=none.
 
   # --- qualitative state ---
-  - material_condition — exactly one of: as_cast / as_fabricated / annealed / recrystallized /
-    stress_relieved / cold_worked / cold_drawn / hot_worked / quenched / solution_treated /
-    solution_treated_and_aged / aged / peak_aged / over_aged / other.
+  - material_condition — exactly one of: as_cast / annealed / recrystallized / cold_worked /
+    solution_treated / solution_treated_and_aged / other.
     Qualitative state only; the AMOUNT of cold work is equivalent_true_strain. Independent
     of strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
-    The deformation OPERATION (drawing, rolling) is deformation_mode, never invented into this
-    field: "drawn" -> deformation_mode=drawing and, if the paper says it is cold, cold_drawn or
-    cold_worked here; do NOT record a value like "cold_rolled" that is not in this list.
 
   # --- the route and its parsed values ---
   - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
@@ -144,29 +124,16 @@ domain_rules: |
     Example: "solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h".
 
   - equivalent_true_strain (CALCULATE if not stated directly): total von Mises EQUIVALENT
-    true strain, comparable across all deformation modes. Compute from the COMBINED reduction,
-    NEVER by adding per-step percentages. Engineering reductions do not add; true strains do.
-      * Combined reduction over sequential steps/passes (each r_i a fraction, 50% -> 0.50):
-          R_total = 1 - (1-r1)(1-r2)...(1-rN)      # remaining-thickness fractions MULTIPLY
-      * rolling / drawing / swaging / extrusion (plane strain, constant width):
-          eps = (2/sqrt(3)) * ln(1/(1 - R_total))
-        The 2/sqrt(3) = 1.1547 is the plane-strain von Mises factor (Hosford & Caddell). Equivalently,
-        since true strains add: eps = (2/sqrt(3)) * sum_i ln(1/(1 - r_i)).
-      * multi-pass shortcut applies ONLY when the SAME operation repeats with EQUAL per-pass
-        reduction: eps = (2/sqrt(3)) * n * ln(1/(1 - r_per_pass)). Distinct operations run
-        back-to-back (e.g. rolling then forging) are NOT passes; sum each step's own equivalent strain.
-      * ECAP: about 1.15 per pass for a 90-degree die (Iwahashi equation); total = n * per-pass
-        (already a von Mises equivalent strain — no extra factor).
+    true strain, comparable across all deformation modes.
+      * rolling / drawing / swaging / extrusion: eps = ln(1/(1 - total_reduction)), reduction as a fraction (50% -> 0.50).
+      * multi-pass: sum the per-pass strains, eps = n * ln(1/(1 - r_per_pass)).
+      * ECAP: about 1.15 per pass for a 90-degree die (Iwahashi equation); total = n * per-pass.
       * HPT / other SPD: use the standard process formula and record the geometric inputs
         (turns, radius, thickness, die angle) in processing_parameters.
-    Plane strain (constant width) is the assumed rolling geometry; note in `notes` if the paper states otherwise.
     Do NOT keep separate "logarithmic" and "cumulative" strains — this one field replaces both.
 
-  - total_reduction_pct: total reduction as REPORTED, in % (raw input to the strain). If several
-    steps are given, the combined reduction is 1 - prod(1 - r_i), NOT the sum of the per-step percentages.
-  - number_of_passes: number of passes of the SAME operation (e.g. 4 rolling passes), if reported.
-    Distinct operations run back-to-back are separate processing_history steps, not passes.
-    Leave null if the per-operation pass count is not stated (do NOT assume 1).
+  - total_reduction_pct: total thickness/area reduction as REPORTED, in % (raw input to the strain).
+  - number_of_passes: number of deformation passes/steps, if reported.
   - strain_rate_per_s: deformation strain rate in s^-1, if reported.
 
   - processing_parameters: process-SPECIFIC parameters not captured above, as key:value pairs
@@ -207,18 +174,6 @@ domain_rules: |
   - loading_direction_relative_to_grain (inside each test block): the relationship between
     loading / crack propagation and grain elongation, e.g. "along_L", "along_S", "L-T crack system".
 
-  DIRECTIONS & ORIENTATIONS (no inference). Record any direction or orientation relationship —
-    deformation/rolling direction, loading direction relative to grain, specimen axis vs rolling
-    direction, texture component — ONLY if the paper explicitly states it. NEVER infer a direction
-    from processing geometry or convention (e.g. do not assume rolling is along the normal direction,
-    or that the loading axis is along or across the grain, just because that is typical). If unstated,
-    the field is null and tagged [direction_not_stated].
-  - PLANELESS DIRECTIONALITY: if a characterization plane is not stated but the paper gives partial
-    directionality (e.g. "sectioned perpendicular to the rolling direction" without naming a full
-    L/T/S plane), record that verbatim in the block's examined_section_directionality field. Do NOT
-    force it into examined_section and do NOT infer a plane; examined_section stays null when no
-    explicit plane is given.
-
   TESTS & CHARACTERIZATION:
   # --- existence: a value must be MEASURED, never manufactured ---
   - A test or characterization block is null unless that method was actually performed on
@@ -255,22 +210,10 @@ domain_rules: |
     computed from inputs you extracted. This exception NEVER extends to physical measured
     properties (hardness, strength, modulus, resistivity, fatigue coefficients).
 
-  - Values shown ONLY in a figure (plot points, curves) are NOT read or estimated by you, and you
-  never compute or guess a datum the paper did not tabulate. Figure-only data is cataloged in
-  figure_digitization_manifest and digitized by hand later (see FIGURE DIGITIZATION below).
-
-  FIGURE DIGITIZATION (metadata only, no coordinate reading).
-  - For each data plot, add one figure_digitization_manifest entry with its axes, scale, series, and
-  whether the same data is already tabulated. Do NOT read or estimate coordinate values off a plot;
-  vision-read points are not trusted. Set worth_digitizing=true only when the figure holds data not
-  present in any table or equation.
-  - MULTI-PANEL FIGURES: enumerate EVERY subpanel and inset (a, b, c, and insets) as its own
-  figure_digitization_manifest entry. Do not stop at the first panel or the first inset.
-  - QUALITATIVE SHAPE EXCEPTION (narrow): you MAY describe the visible SHAPE of a distribution
-  histogram (narrow / broad / bimodal / unimodal / uniform / right_skewed / left_skewed) in
-  grain_size_distribution or precipitate_size_distribution, because that reports what the figure
-  shows, not a coordinate. This NEVER extends to reading a numeric value (a mean, SD, or D-value)
-  off a plot; those remain digitization-only.
+  - graph_read is allowed and is NOT conversion. A value digitized off a plot in THIS paper is a
+    reported measurement; tag [graph_read]. Reading a datum off the paper's own figure is fine;
+    computing a datum the paper never showed is not.
+  OBSERVED-IN-THIS-WORK RULE (no extraction from background/introduction).
 
   - Fill a field ONLY from what THIS paper observed, measured, or determined for THIS
     material-condition in its own Methods, Results, or Discussion. Statements in the
@@ -372,8 +315,9 @@ domain_rules: |
   - Digitize a plot ONLY for datapoints not otherwise reported. Before digitizing, name the
     exact figure+subfigure in plot_source, read the axis labels, units, and scale (LCF plots
     are usually log-log), and identify each series (elastic/plastic/total, or a strain range).
-
-  - NEVER invent points to complete a curve. Anti-fabrication and observed-in-this-work rules apply.
+    Tag every point [graph_read] with [high]/[low].
+  - If axes or series are unreadable, record fewer points or none and tag [graph_read][low].
+    NEVER invent points to complete a curve. Anti-fabrication and observed-in-this-work rules apply.
 
   F. PLOT TYPES (plot_type vocabulary):
     strain_life                     : strain amplitude vs reversals/cycles to failure
@@ -385,15 +329,6 @@ domain_rules: |
     monotonic_and_cyclic_ssc        : monotonic + cyclic stress-strain curves
     hysteresis_loop                 : stress-strain loop at half-life (cyclic hardening/softening)
     other
-
-  G. STRAIN-COEFFICIENT UNITS (no silent scaling).
-  - Record fatigue_ductility_coefficient and elastic_strain_line_coefficient EXACTLY as printed.
-    NEVER multiply a fraction by 100 or divide a percent by 100 to "normalise" it. A paper reporting
-    0.407 and a paper reporting 40.7% are different records, not the same value in different clothes.
-  - If the paper states a unit for the coefficient (e.g. %), set the matching *_unit field
-    (fatigue_ductility_coefficient_unit / elastic_strain_line_coefficient_unit) to percent; if the
-    value is dimensionless, set it to fraction. When the paper is explicit about the unit, honour it;
-    when it is not, record the value as printed and set the unit to the form shown.
 
 # -----------------------------------------------------------------------------
 # MATERIAL LAYER  (flat scalar attributes; one record per material-condition)
@@ -445,25 +380,6 @@ fields:
   - name: secondary_addition_unit
     type: str
     description: "Unit for secondary_addition_concentration — exactly one of: ppm / wt% / at%."
-  - name: primary_addition_concentration_min
-    type: float
-    description: "Lower bound of primary_addition_element concentration when given as a RANGE
-      (e.g. a UNS/EN spec range). Same unit as primary_addition_unit. Null for a point value."
-  - name: primary_addition_concentration_max
-    type: float
-    description: "Upper bound of primary_addition_element concentration when given as a RANGE. Null for a point value."
-  - name: secondary_addition_concentration_min
-    type: float
-    description: "Lower bound of secondary_addition_element concentration when given as a RANGE. Null for a point value."
-  - name: secondary_addition_concentration_max
-    type: float
-    description: "Upper bound of secondary_addition_element concentration when given as a RANGE. Null for a point value."
-  - name: composition_source
-    type: str
-    description: "Provenance of the composition — one of: paper_measured / paper_nominal /
-      UNS_spec / EN_spec / other. UNS_spec / EN_spec mean the values (typically ranges in the
-      *_min/*_max fields) come from a standard designation cited in the paper, NOT a measurement
-      of this material. Never leave a spec-derived composition untagged."
   - name: other_additions
     type: str
     description: "Further intentional alloying elements beyond primary/secondary, as
@@ -488,12 +404,9 @@ fields:
   # ── Summary & audit (whole-route view; parsed fields below are pulled from these) ──
   - name: material_condition
     type: str
-    description: "Qualitative end state — exactly one of: as_cast / as_fabricated / annealed /
-      recrystallized / stress_relieved / cold_worked / cold_drawn / hot_worked / quenched /
-      solution_treated / solution_treated_and_aged / aged / peak_aged / over_aged / other. State only;
-      the amount of cold work is equivalent_true_strain. The deformation operation (drawing, rolling)
-      is deformation_mode, not this field. Independent of strengthening mechanism (a sample can be
-      peak-aged AND cold-worked)."
+    description: "Qualitative end state — exactly one of: as_cast / annealed / recrystallized /
+      cold_worked / solution_treated / solution_treated_and_aged / other. State only; the amount of
+      cold work is equivalent_true_strain. Independent of strengthening mechanism (a sample can be peak-aged AND cold-worked)."
   - name: processing_history
     type: str
     description: "Full processing route in reading order, recorded verbatim (lightly normalised);
@@ -506,9 +419,9 @@ fields:
     description: "How the billet was first made solid, before any wrought processing —
       exactly one of: cast / powder_metallurgy / additive_manufacturing / other / not_specified.
       Independent of deformation and heat treatment. Most wrought Cu = cast; GlidCop = powder_metallurgy."
-  - name: primary_synthesis_technique
+  - name: synthesis_technique
     type: str
-    description: "Specific named consolidation or additive process if one applies, else null. One of:
+    description: "Specific named consolidation process if one applies, else null. One of:
       spark_plasma_sintering / hot_isostatic_pressing / hot_pressing / conventional_sintering /
       internal_oxidation / LPBF / DED / other. Null for plain casting or unspecified."
 
@@ -586,7 +499,7 @@ fields:
   - name: processing_parameters
     type: str
     description: "Process-specific parameters as key:value with units, keyed to the relevant process
-      field (deformation_mode/technique or primary_synthesis_technique). E.g. ECAP 'route=Bc; die_angle=90deg';
+      field (deformation_mode/technique or synthesis_technique). E.g. ECAP 'route=Bc; die_angle=90deg';
       SPS 'pressure=50MPa; dwell=5min'. Null if none."
 
   # ── MICROSTRUCTURE: grain structure ──────────────────────────────────────────
@@ -630,9 +543,7 @@ fields:
     description: "Grain shape, e.g. 'equiaxed', 'elongated', 'pancake', 'fibrous'"
   - name: grain_size_distribution
     type: str
-    description: "Spread/uniformity and visible shape — e.g. narrow / broad / bimodal / unimodal /
-      uniform / right_skewed / left_skewed. Qualitative shape MAY be read from a distribution
-      histogram (see domain rules); numeric SD is digitization-only (grain_size_*_sd_um)."
+    description: "Spread/uniformity, e.g. 'narrow', 'bimodal', 'broad'"
   - name: crystallographic_texture
     type: str
     description: "Texture, e.g. 'strong {110}<001> Goss', 'weak cube'"
@@ -657,27 +568,12 @@ fields:
     description: "Twin boundary fraction, % (annealing twins are common in Cu)"
 
   # ── MICROSTRUCTURE: second-phase constituents (OBSERVED) ────────────────────
-  - name: precipitate_crystal_structure
-    type: str
-    description: "Crystal structure of the precipitate/second phase as reported, e.g. BCC / FCC / HCP /
-      B2 / L1_2 / DO22 / C15 Laves / tetragonal / amorphous. Capture the paper's own designation.
-      Fill ONLY if the paper determined it (XRD, selected-area or TEM diffraction); do not infer it
-      from the element. Tag [structure_probe_absent] in notes if the structure was not measured."
   - name: phase_type_and_volume_fraction
     type: str
     description: "Observed phases and volume fractions, e.g. 'alpha-Cu + 5% Cr', 'alpha + beta brass 60/40'"
   - name: precipitate_size_distribution
     type: str
     description: "Observed precipitate size and spatial distribution, if present"
-  - name: precipitate_mean_size_nm
-    type: float
-    unit: nm
-    description: "Mean/average precipitate size in nm, if the paper reports one for THIS
-      material-condition (do not read it off a plot). Method in precipitate_size_method."
-  - name: precipitate_size_method
-    type: str
-    description: "Technique behind the precipitate size/distribution — e.g. TEM / SEM / APT / SAXS.
-      Record the most specific technique named (see umbrella-vs-specific rule)."
   - name: inclusion_content_distribution
     type: str
     description: "Non-metallic inclusion content/distribution, e.g. oxides (Cu2O), sulfides (MnS)"
@@ -745,7 +641,7 @@ fields:
   - name: notes
     type: str
     description: "Uncertainties, methodology caveats, unit conversions, derived values.
-      Tags: [methodology] [grain_size_methodology] [derived] [unit_converted] [scope_caveat] [finding]"
+      Tags: [methodology] [grain_size_methodology] [graph_read] [derived] [unit_converted] [scope_caveat] [finding]"
 
 
 
@@ -797,7 +693,6 @@ tests:
       - {name: hardness_value, type: float, description: "Hardness number on hardness_scale"}
       - {name: hardness_error_plus_minus, type: float, description: "± error on the value, if reported"}
       - {name: test_load_kgf, type: float, unit: kgf, description: "Indentation load, kgf (e.g. 0.1 for HV0.1)"}
-      - {name: indentation_dwell_time_s, type: float, unit: s, description: "Indentation dwell/hold time, s (e.g. 10-15 s for Vickers), if reported"}
 
   electrical:
     conditions:
@@ -830,23 +725,21 @@ tests:
       - {name: specimen_gauge_diameter_mm, type: float, unit: mm, description: "Gauge diameter"}
       - {name: specimen_gauge_length_mm, type: float, unit: mm, description: "Gauge length"}
       - {name: specimen_surface_roughness_Rz_um, type: float, unit: um, description: "Gauge surface roughness Rz (note in notes if reported as Ra). Surface finish is a primary fatigue-initiation factor."}
-
+    
     # The flat coefficient/exponent fields below are BY DEFINITION the single full-range (total)
       # Coffin-Manson-Basquin fit on a reversals + amplitude basis (life_basis=reversals_2Nf,
       # strain_measure=amplitude). Anything else -> additional_parameters, never here.
-
+    
     results:
       - {name: cyclic_response, type: str, description: "'hardening' / 'softening' / 'stable' / 'mixed'"}
-      - {name: fatigue_ductility_coefficient, type: float, description: "Coffin-Manson plastic coefficient eps_f'. Record EXACTLY as printed; never rescale a fraction to percent or vice versa."}
-      - {name: fatigue_ductility_coefficient_unit, type: str, description: "Unit of fatigue_ductility_coefficient as printed — one of: fraction / percent."}
+      - {name: fatigue_ductility_coefficient, type: float, description: "Coffin-Manson plastic coefficient eps_f'"}
       - {name: fatigue_ductility_exponent, type: float, description: "Coffin-Manson plastic exponent c (negative)"}
       - {name: fatigue_strength_coefficient_MPa, type: float, unit: MPa, description: "Basquin elastic coefficient sigma_f'"}
       - {name: fatigue_strength_exponent, type: float, description: "Basquin elastic exponent b (negative)"}
       - {name: cyclic_strength_coefficient_K_prime_MPa, type: float, unit: MPa, description: "Cyclic strength coefficient K'"}
       - {name: cyclic_strain_hardening_exponent_n_prime, type: float, description: "Cyclic strain-hardening exponent n'"}
       - {name: transition_fatigue_life_2Nt, type: float, description: "Transition reversals (elastic = plastic), if reported"}
-      - {name: elastic_strain_line_coefficient, type: float, description: "Strain-based elastic-line coefficient Ke in de_e/2 = Ke*N^Ce (dimensionless or %, NOT sigma_f'; Ke = sigma_f'/E). Record EXACTLY as printed; never rescale."}
-      - {name: elastic_strain_line_coefficient_unit, type: str, description: "Unit of elastic_strain_line_coefficient as printed — one of: fraction / percent."}
+      - {name: elastic_strain_line_coefficient, type: float, description: "Strain-based elastic-line coefficient Ke in de_e/2 = Ke*N^Ce (dimensionless or %, NOT sigma_f'; Ke = sigma_f'/E)."}
       - {name: elastic_strain_line_exponent, type: float, description: "Strain-based elastic-line exponent Ce (usually negative)."}
       - name: data_points
         item_fields:
@@ -884,7 +777,6 @@ characterization:
       - {name: eds_used, type: bool, description: "Whether EDS composition mapping was used"}
     specimen:
       - {name: examined_section, type: str, description: "e.g. 'L-T plane', 'fracture_surface'"}
-      - {name: examined_section_directionality, type: str, description: "Partial directionality when no full plane is stated, verbatim (e.g. 'perpendicular to RD'); null if none. Do not infer."}
       - {name: surface_prep, type: str, description: "e.g. 'polished', 'etched'"}
     results:
       - {name: crack_initiation_site, type: str, description: "surface / subsurface / inclusion / pore / slip bands / PSB / grain_boundary"}
@@ -900,7 +792,6 @@ characterization:
       - {name: indexing_rate_pct, type: float, unit: "%", description: "Indexing/hit rate, %"}
     specimen:
       - {name: examined_section, type: str, description: "e.g. 'L-T plane'"}
-      - {name: examined_section_directionality, type: str, description: "Partial directionality when no full plane is stated, verbatim (e.g. 'perpendicular to RD'); null if none. Do not infer."}
     results:
       - {name: HAGB_fraction_pct, type: float, unit: "%", description: "High-angle (>15deg) boundary fraction, %"}
       - {name: LAGB_fraction_pct, type: float, unit: "%", description: "Low-angle boundary fraction, %"}
@@ -916,7 +807,6 @@ characterization:
       - {name: method, type: str, description: "Rietveld / Williamson_Hall / modified_Warren_Averbach / sin2psi"}
     specimen:
       - {name: examined_surface_or_section, type: str, description: "Surface/plane examined"}
-      - {name: examined_section_directionality, type: str, description: "Partial directionality when no full plane is stated, verbatim (e.g. 'perpendicular to RD'); null if none. Do not infer."}
     results:
       - {name: phases_identified, type: str, description: "Phases + Rietveld wt% if given"}
       - {name: lattice_parameter_angstrom, type: float, unit: angstrom, description: "Lattice parameter, A"}
@@ -931,7 +821,6 @@ characterization:
       - {name: mode, type: str, description: "One of: BF / DF / weak_beam / HRTEM / STEM"}
     specimen:
       - {name: foil_plane, type: str, description: "Foil orientation, e.g. 'L-T'"}
-      - {name: foil_plane_directionality, type: str, description: "Partial directionality when no full foil plane is stated, verbatim (e.g. 'perpendicular to RD'); null if none. Do not infer."}
       - {name: foil_prep, type: str, description: "e.g. 'electropolished', 'FIB'"}
     results:
       - {name: dislocation_density_TEM_m2, type: float, unit: "m^-2", description: "Dislocation density (weak-beam count), m^-2"}
@@ -942,3 +831,4 @@ characterization:
       - {name: stacking_fault_energy_mJ_m2, type: float, unit: "mJ/m^2", description: "MEASURED SFE (node/ribbon/partial separation)"}
       - {name: stacking_fault_width_nm, type: float, unit: nm, description: "Stacking fault / partial separation width, nm"}
       - {name: twin_thickness_nm, type: float, unit: nm, description: "Deformation twin thickness, nm"}
+  
