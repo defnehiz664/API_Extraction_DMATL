@@ -6,8 +6,39 @@
     "message": "Full text XML saved (260908 chars)"
   },
   {
-    "doi": "10.1002/adem.201500561",
-    "status": "no_oa_pdf",
-    "message": "No open-access PDF found via Unpaywall.\nDownload the PDF manually and save it as:\n  data/papers/10-1002_adem-201500561.pdf\nThen run: python scripts/extract_data.py 10.1002/adem.201500561"
+    "doi": "10.1016/j.ijfatigue.2020.105642",
+    "status": "full_text",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-ijfatigue-2020-105642.xml",
+    "message": "Full text XML saved (247310 chars)"
+  },
+  {
+    "doi": "10.1016/j.dib.2024.110687",
+    "status": "full_text",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-dib-2024-110687.xml",
+    "message": "Full text XML saved (200199 chars)"
+  },
+  {
+    "doi": "10.1016/j.actamat.2014.10.002",
+    "status": "full_text",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-actamat-2014-10-002.xml",
+    "message": "Full text XML saved (330514 chars)"
+  },
+  {
+    "doi": "10.1016/j.matchar.2019.109940",
+    "status": "full_text",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-matchar-2019-109940.xml",
+    "message": "Full text XML saved (281836 chars)"
+  },
+  {
+    "doi": "10.1016/j.msea.2013.06.034",
+    "status": "full_text",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-msea-2013-06-034.xml",
+    "message": "Full text XML saved (133002 chars)"
+  },
+  {
+    "doi": "10.1016/j.jnucmat.2007.03.055",
+    "status": "full_text",
+    "filename": "/Users/defnehiz/API_Extraction_DMATL-1/data/papers/10-1016_j-jnucmat-2007-03-055.xml",
+    "message": "Full text XML saved (73612 chars)"
   }
 ]

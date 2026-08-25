@@ -71,15 +71,26 @@ OVERWRITE_FROM_MENDELEEV = {
 }
 
 
+CANON_BLOCKS = {"sem": "SEM", "tem": "TEM", "ebsd": "EBSD", "xrd": "XRD"}
+
+def _canon_record(rec: dict) -> dict:
+    """Merge case-variant block keys (sem/SEM) so each record uses one canonical name."""
+    out = {}
+    for k, v in rec.items():
+        ck = CANON_BLOCKS.get(str(k).lower(), k)
+        if ck in out and isinstance(out[ck], dict) and isinstance(v, dict):
+            out[ck] = {**out[ck], **v}          # both variants present: merge
+        elif ck not in out or out[ck] in (None, "", {}, []):
+            out[ck] = v
+    return out
+
 def load_all_records(outputs_dir: Path) -> list:
-    """Flatten every record across every *_extraction.json into one list,
-    tagging each with its source file for traceability."""
     records = []
     for f in sorted(outputs_dir.glob("*_extraction.json")):
         with open(f, encoding="utf-8") as fh:
             data = json.load(fh)
         for rec in data.get("records", []):
-            rec = dict(rec)
+            rec = _canon_record(dict(rec))
             rec["_source_file"] = f.name
             records.append(rec)
     return records
