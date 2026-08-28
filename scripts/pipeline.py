@@ -43,6 +43,7 @@ from mendeleev_features import compute_mendeleev_features
 from mp_features import compute_mp_features
 #from usfe_features import compute_usfe_features
 from lcf_export_patch import _write_excel_output
+from schema_loader import assign_record_ids
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUTS_DIR = REPO_ROOT / "data" / "outputs"
@@ -84,17 +85,20 @@ def _canon_record(rec: dict) -> dict:
             out[ck] = v
     return out
 
+
 def load_all_records(outputs_dir: Path) -> list:
     records = []
     for f in sorted(outputs_dir.glob("*_extraction.json")):
         with open(f, encoding="utf-8") as fh:
             data = json.load(fh)
-        for rec in data.get("records", []):
-            rec = _canon_record(dict(rec))
+        recs = [_canon_record(dict(rec)) for rec in data.get("records", [])]
+        # re-derived here too, so extraction JSONs written before make_record_id
+        # existed do not have to be re-run through the API
+        assign_record_ids(recs, f.stem.removesuffix("_extraction"))
+        for rec in recs:
             rec["_source_file"] = f.name
             records.append(rec)
     return records
-
 
 
 def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Path):
