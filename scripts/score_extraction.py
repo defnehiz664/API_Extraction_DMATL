@@ -36,7 +36,17 @@ RTOL, ATOL = 1e-3, 1e-6
 _BOOL = {"true": True, "false": False, "yes": True, "no": False, "y": True, "n": False, "1": True, "0": False}
 _VERIFIED_EMPTY = {"null", "<null>", "∅", "n/a", "na", "verified_empty", "verified-empty"}
 _SCALE = (10.0, 100.0, 1000.0, 0.1, 0.01, 0.001)
-IDENTITY_COLS = {"record_id", "material_name", "source_doi", "fit_regime", "fit_range"}
+IDENTITY_COLS = {"record_id", "material_name", "source_doi"}
+
+# Free-text columns excluded from scoring by default: the gold was built by
+# pasting snippets from the paper, so wording differs from the model's summary
+# without either being wrong. Override with --ignore.
+IGNORE_COLS = {"notes", "source_figure_or_table"}
+
+# Columns that tell apart several rows of the same material within one sheet.
+# Hand-corrected data cells, so they only refine pairing inside a group; rows
+# they cannot pair fall back to order of appearance.
+DISCRIMINATORS = {"lcf": ("fit_range", "fit_regime"), "lcf_legend": ("symbol",)}
 
 
 def _real_col(c) -> bool:
@@ -58,6 +68,8 @@ def _blank(v):
 
 def _vempty(v):
     return isinstance(v, str) and v.strip().casefold() in _VERIFIED_EMPTY
+
+
 
 
 def _f(v):
@@ -121,28 +133,84 @@ def _get_ci(row, lowmap, name):
 
 
 def _paper(row, lowmap):
-    """A paper identifier that is stable across runs: the slug part of
-    record_id (index stripped), or source_DOI, else ''. record_id VALUES differ
-    between the gold and a fresh extraction (per-run indexing), so this is only
-    used as a first-tier disambiguator, with a material-only fallback."""
+    """Run-stable paper identifier. New ids are <doi>__<material>[__<condition>];
+    legacy ids are <doi>-<index>. Both reduce to the doi slug, so a gold built
+    before make_record_id still matches a fresh run at the strict tier."""
     rid = _get_ci(row, lowmap, "record_id")
     if not _blank(rid):
-        return re.sub(r"-\d+$", "", _s(rid))
+        s = _s(rid)
+        return s.split("__", 1)[0] if "__" in s else re.sub(r"-\d+$", "", s)
     sd = _get_ci(row, lowmap, "source_doi")
     if not _blank(sd):
         return _s(sd).rstrip("/")
     return ""
 
 
-def _loose_key(row, lowmap, is_lcf):
-    key = [_s(_get_ci(row, lowmap, "material_name")) or "?"]
-    if is_lcf:
-        key += [_s(_get_ci(row, lowmap, "fit_regime")), _s(_get_ci(row, lowmap, "fit_range"))]
-    return tuple(key)
+def _norm(v):
+    """Key-normalized cell. Blank of any kind and the verified-empty marker both
+    collapse to '': as a key they assert the same thing. The distinction still
+    matters during auditing, where _vempty is what separates TN from FP."""
+    return "" if _blank(v) or _vempty(v) else _s(v)
 
 
-def _strict_key(row, lowmap, is_lcf):
-    return (_paper(row, lowmap),) + _loose_key(row, lowmap, is_lcf)
+def _group_key(row, lowmap):
+    return (_paper(row, lowmap), _norm(_get_ci(row, lowmap, "material_name")))
+
+
+def _disc(row, lowmap, cols):
+    return tuple(_norm(_get_ci(row, lowmap, c)) for c in cols)
+
+
+def _row_label(row, lowmap, cols):
+    """Row identifier for reports and flip-detection keys."""
+    return _group_key(row, lowmap) + _disc(row, lowmap, cols)
+
+
+def _pair_rows(grows, prows, glow, plow, disc_cols):
+    """Pair gold rows to prediction rows. Group on paper + material_name; inside
+    a group pair on the discriminator where it is populated on both sides, then
+    pair whatever is left in order of appearance. A group that finds no
+    prediction bucket retries on material_name alone, covering a changed or
+    absent paper id. Returns (pairs, missed_gold_idx, spurious_pred_idx)."""
+    full, mat_only = defaultdict(list), defaultdict(list)
+    for i, r in enumerate(prows):
+        gk = _group_key(r, plow)
+        full[gk].append(i)
+        mat_only[gk[1]].append(i)
+
+    gbuckets = defaultdict(list)
+    for j, r in enumerate(grows):
+        gbuckets[_group_key(r, glow)].append(j)
+
+    pairs, missed, used = [], [], set()
+    for gk, gidx in gbuckets.items():
+        pidx = [i for i in full.get(gk, []) if i not in used]
+        if not pidx:
+            pidx = [i for i in mat_only.get(gk[1], []) if i not in used]
+
+        if disc_cols:
+            by_disc = defaultdict(list)
+            for i in pidx:
+                by_disc[_disc(prows[i], plow, disc_cols)].append(i)
+            unpaired = []
+            for j in gidx:
+                d = _disc(grows[j], glow, disc_cols)
+                cand = by_disc.get(d) if any(d) else None   # all-blank identifies nothing
+                if cand:
+                    i = cand.pop(0)
+                    used.add(i)
+                    pairs.append((j, i))
+                else:
+                    unpaired.append(j)
+            gidx = unpaired
+            pidx = [i for i in pidx if i not in used]
+
+        for j, i in zip(gidx, pidx):
+            used.add(i)
+            pairs.append((j, i))
+        missed += gidx[len(pidx):]
+
+    return pairs, missed, [i for i in range(len(prows)) if i not in used]
 
 
 def _blank_counts():
@@ -159,14 +227,16 @@ def _rates(c):
         "format_unit": c["fmt"], "fabrication": c["fab"],
         "precision": c["tp"] / (c["tp"] + fp) if (c["tp"] + fp) else 1.0,
         "recall": c["tp"] / (c["tp"] + fn) if (c["tp"] + fn) else 1.0,
-        "accuracy": c["tp"] / gold_cells if gold_cells else 1.0,
+        "accuracy": (c["tp"] + c["tn"]) / (c["tp"] + c["tn"] + fp + fn) if (c["tp"] + c["tn"] + fp + fn) else 1.0,
     }
 
 
 # ── scoring ───────────────────────────────────────────────────────────────────
 
-def score(gold_path, pred_path):
-    """Return {'per_sheet', 'overall', 'instances', 'pred_cells', 'reconcile'}."""
+def score(gold_path, pred_path, ignore_cols=IGNORE_COLS, count_missed=True):
+    """Return {'per_sheet', 'overall', 'instances', 'pred_cells', 'reconcile', 'row_match'}."""
+    ignore_cols = {str(c).lower() for c in ignore_cols}
+
     gxl, pxl = pd.ExcelFile(gold_path), pd.ExcelFile(pred_path)
     pred_sheets = {n.lower(): n for n in pxl.sheet_names}
 
@@ -182,40 +252,25 @@ def score(gold_path, pred_path):
         gdf = gdf.where(pd.notnull(gdf), None)
         pdf = pdf.where(pd.notnull(pdf), None)
 
-        is_lcf = gname.lower() == "lcf"
+        disc_cols = DISCRIMINATORS.get(gname.lower(), ())
         glow, plow = _lowmap(gdf), _lowmap(pdf)
-        audit = [c for c in gdf.columns if _real_col(c) and str(c).lower() not in IDENTITY_COLS]
+        audit = [c for c in gdf.columns if _real_col(c)
+                 and str(c).lower() not in IDENTITY_COLS
+                 and str(c).lower() in plow # absent from prediction: reported, not scored
+                 and str(c).lower() not in ignore_cols]
 
-        # index prediction rows by strict and loose key; consume on match so a
-        # pred row is used once. strict first (disambiguates papers), then loose.
-        pred_list = [r for _, r in pdf.iterrows()]
-        strict_idx, loose_idx = defaultdict(list), defaultdict(list)
-        for i, r in enumerate(pred_list):
-            strict_idx[_strict_key(r, plow, is_lcf)].append(i)
-            loose_idx[_loose_key(r, plow, is_lcf)].append(i)
-        consumed = set()
-
-        def _take(index, key):
-            for i in index.get(key, []):
-                if i not in consumed:
-                    consumed.add(i)
-                    return pred_list[i]
-            return None
+        grows = [r for _, r in gdf.iterrows()]
+        prows = [r for _, r in pdf.iterrows()]
+        pairs, missed_idx, spurious_idx = _pair_rows(grows, prows, glow, plow, disc_cols)
 
         c = _blank_counts()
         missing_cols = [col for col in audit if col.lower() not in plow]
         if missing_cols:
             reconcile.setdefault(gname, []).append(f"columns absent from prediction: {missing_cols}")
 
-        missed_rows = []
-        for _, grow in gdf.iterrows():
-            k = _loose_key(grow, glow, is_lcf)
-            prow = _take(strict_idx, _strict_key(grow, glow, is_lcf))
-            if prow is None:
-                prow = _take(loose_idx, k)
-            if prow is None:
-                missed_rows.append(k)
-                continue
+        for j, i in pairs:
+            grow, prow = grows[j], prows[i]
+            k = _row_label(grow, glow, disc_cols)
             for col in audit:
                 gv = grow[col]
                 if _blank(gv):
@@ -244,16 +299,31 @@ def score(gold_path, pred_path):
                     c["wrong"] += 1
                     instances.append((gname, k, col, "wrong_value", note))
 
-        spurious_rows = [_loose_key(pred_list[i], plow, is_lcf)
-                         for i in range(len(pred_list)) if i not in consumed]
+        # An unmatched gold row is a record the prediction never produced, so every
+        # value it holds is an omission. Verified-empty cells are skipped: with
+        # nothing predicted, "should be empty" is trivially satisfied.
+        if count_missed:
+            for j in missed_idx:
+                grow = grows[j]
+                k = _row_label(grow, glow, disc_cols)
+                for col in audit:
+                    gv = grow[col]
+                    if _blank(gv) or _vempty(gv):
+                        continue
+                    c["omit"] += 1
+                    instances.append((gname, k, col, "omission", "row absent from prediction"))
+
+        missed_rows = [_row_label(grows[j], glow, disc_cols) for j in missed_idx]
+        spurious_rows = [_row_label(prows[i], plow, disc_cols) for i in spurious_idx]
         rates = _rates(c)
-        rates["matched_rows"] = len(consumed)
+        rates["matched_rows"] = len(pairs)
         rates["missed_rows"] = len(missed_rows)
         rates["spurious_rows"] = len(spurious_rows)
         per_sheet[gname] = rates
         row_match[gname] = {"missed": missed_rows, "spurious": spurious_rows}
         for kk in overall:
-            overall[kk] += c[kk]
+            overall[kk] += c[kk]        
+            
 
     return {"per_sheet": per_sheet, "overall": _rates(overall),
             "instances": instances, "pred_cells": pred_cells,
@@ -277,7 +347,7 @@ def _unique_sheet(name, existing):
     return f"{base[:27]}_{i}"
 
 
-def write_report(path, results, gold, pred, label):
+def write_report(path, results, gold, pred, label, schema_version=None, count_missed=True):
     """Append this run to an Excel log: one detail sheet of error instances,
     plus a cumulative 'summary' sheet gaining one row per run."""
     path = Path(path)
@@ -286,7 +356,10 @@ def write_report(path, results, gold, pred, label):
     ov = results["overall"]
 
     summary_row = {
-        "run_id": run_id, "timestamp": ts, "gold": str(gold), "pred": str(pred),
+        "run_id": run_id, "timestamp": ts, 
+        "schema_version": schema_version or "",
+        "count_missed": count_missed,
+        "gold": str(gold), "pred": str(pred),
         "TP": ov["TP"], "FP": ov["FP"], "FN": ov["FN"], "TN": ov["TN"],
         "precision": round(ov["precision"], 4), "recall": round(ov["recall"], 4),
         "accuracy": round(ov["accuracy"], 4),
@@ -336,9 +409,19 @@ def main():
                     help="Excel log to append this run to (default data/score_history.xlsx)")
     ap.add_argument("--label", default=None, help="run label for the report sheet/row (default: timestamp)")
     ap.add_argument("--no-report", action="store_true", help="do not write to the report log")
-    args = ap.parse_args()
+    ap.add_argument("--ignore", default=None,
+                    help=f"comma-separated columns excluded from scoring "
+                         f"(default: {','.join(sorted(IGNORE_COLS))})")
+    ap.add_argument("--no-count-missed-rows", action="store_true",
+                    help="do not charge a gold row absent from the prediction as omissions")
+    ap.add_argument("--schema-version", default=None,
+                    help="schema version this run scored, e.g. v12 (recorded in the history)")
 
-    res = score(args.gold, args.pred)
+    args = ap.parse_args()
+    ignore = {x.strip() for x in args.ignore.split(",")} if args.ignore else IGNORE_COLS
+    res = score(args.gold, args.pred, ignore_cols=ignore,
+        count_missed=not args.no_count_missed_rows)
+    
     print(f"Gold: {args.gold}\nPred: {args.pred}")
     for sheet, r in res["per_sheet"].items():
         _print_block(sheet, r)
@@ -363,8 +446,15 @@ def main():
         for sheet, msg in res["reconcile"].items():
             print(f"  {sheet}: {msg}")
 
+
+    ignore = {x.strip() for x in args.ignore.split(",")} if args.ignore else IGNORE_COLS
+    res = score(args.gold, args.pred, ignore_cols=ignore,
+        count_missed=not args.no_count_missed_rows)
+
     if not args.no_report:
-        write_report(args.report, res, args.gold, args.pred, args.label)
+        write_report(args.report, res, args.gold, args.pred, args.label,
+            schema_version=args.schema_version,
+            count_missed=not args.no_count_missed_rows)
 
     ok = not res["instances"] and not res["reconcile"]
     sys.exit(0 if ok else 1)
