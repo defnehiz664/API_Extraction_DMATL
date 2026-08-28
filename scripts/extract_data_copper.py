@@ -1,5 +1,5 @@
 """
-extract_data.py
+extract_data_copper.py
 ===============
 Extracts structured data from papers using Gemini, matching dataset schema exactly.
 
@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
-from schema_loader import load_schema, build_schema_prompt_section
+from schema_loader import load_schema, build_schema_prompt_section, assign_record_ids
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
@@ -539,11 +539,9 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
                   f"Raise max_output_tokens or split this paper's extraction into fewer records per call.")
         data = {"error": "parse_failed", "finish_reason": str(finish_reason), "raw": raw}
 
-    # give each record a stable id tied to the source
+        # deterministic id: same paper + same material -> same id on every run
     if isinstance(data, list):
-        for i, rec in enumerate(data, start=1):
-            if isinstance(rec, dict) and not rec.get("record_id"):
-                rec["record_id"] = f"{doi_slug}-{i}"
+        assign_record_ids(data, doi_slug)
 
     output = {
         "model":           MODEL,
