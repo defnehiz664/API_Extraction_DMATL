@@ -20,6 +20,7 @@ import yaml
 from pathlib import Path
 from typing import Optional
 from pydantic import create_model, BaseModel, ConfigDict
+import re
 
 _SCALARS = {"str": str, "float": float, "int": int, "bool": bool}
 _LIST_SCALARS = {
@@ -128,6 +129,50 @@ def build_schema_prompt_section(config: dict) -> str:
     return "\n".join(lines)
 
 
+# ── record identity ───────────────────────────────────────────────────────────
+
+RECORD_ID_SEP = "__"
+# Schema field(s) tried, in order, for the optional third id segment. Empty on
+# purpose: adding a field here changes every id, so it must be one that is
+# populated consistently or ids stop comparing across runs.
+RECORD_ID_CONDITION_FIELDS: tuple[str, ...] = ()
+
+
+def slugify(value) -> str:
+    """Lowercase hyphen-joined ASCII. Cannot produce RECORD_ID_SEP."""
+    s = re.sub(r"[^a-z0-9]+", "-", str(value).casefold()).strip("-")
+    return s or "unknown"
+
+
+def make_record_id(doi_slug: str, material_name, condition=None) -> str:
+    """<doi_slug>__<material>[__<condition>]. doi_slug arrives already slugged
+    (extract_data.doi_to_filename), keeping file naming out of this module."""
+    parts = [str(doi_slug).casefold(), slugify(material_name)]
+    if condition not in (None, ""):
+        parts.append(slugify(condition))
+    return RECORD_ID_SEP.join(parts)
+
+
+def assign_record_ids(records: list, doi_slug: str) -> list:
+    """Stamp deterministic ids on one paper's records, in place. Two records
+    with the same material (+condition) are indistinguishable by content, so
+    they get an ordinal segment: those rows are the only ones whose id still
+    depends on extraction order, and the warning says so."""
+    seen = {}
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        cond = next((rec[f] for f in RECORD_ID_CONDITION_FIELDS if rec.get(f)), None)
+        rid = make_record_id(doi_slug, rec.get("material_name") or "unknown", cond)
+        seen[rid] = seen.get(rid, 0) + 1
+        if seen[rid] > 1:
+            print(f"  WARNING: {seen[rid]} records share id {rid}; appending ordinal "
+                  f"(material_name{'+condition' if cond else ''} not unique in this paper)")
+            rid = f"{rid}{RECORD_ID_SEP}{seen[rid]}"
+        rec["record_id"] = rid
+    return records
+
+
 if __name__ == "__main__":
     import sys
 
@@ -141,3 +186,4 @@ if __name__ == "__main__":
     print(f"Loaded schema from {schema_path}")
     print(f"Generated Pydantic model: {model.__name__}")
     print("schema_loader.py ran successfully.")
+
