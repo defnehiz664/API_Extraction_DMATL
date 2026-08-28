@@ -48,6 +48,8 @@ IGNORE_COLS = {"notes", "source_figure_or_table"}
 # they cannot pair fall back to order of appearance.
 DISCRIMINATORS = {"lcf": ("fit_range", "fit_regime"), "lcf_legend": ("symbol",)}
 
+DEFAULT_REPORT = "data/success quantification/score_history.xlsx"
+
 
 def _real_col(c) -> bool:
     """A genuine header, not a phantom Excel column (blank header -> pandas
@@ -405,8 +407,8 @@ def main():
     ap = argparse.ArgumentParser(description="Confusion-matrix scoring, gold vs pipeline output.")
     ap.add_argument("--gold", required=True)
     ap.add_argument("--pred", required=True)
-    ap.add_argument("--report", default="data/score_history.xlsx",
-                    help="Excel log to append this run to (default data/score_history.xlsx)")
+    ap.add_argument("--report", default=DEFAULT_REPORT,
+                    help=f"Excel log to append this run to (default {DEFAULT_REPORT})")
     ap.add_argument("--label", default=None, help="run label for the report sheet/row (default: timestamp)")
     ap.add_argument("--no-report", action="store_true", help="do not write to the report log")
     ap.add_argument("--ignore", default=None,
