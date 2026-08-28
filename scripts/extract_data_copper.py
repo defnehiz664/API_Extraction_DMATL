@@ -497,18 +497,27 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         contents.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
 
     max_output_tokens = 65536
+    if "-pro" in MODEL:
+        thinking_config = types.ThinkingConfig(thinking_budget=4096)
+    elif "3.5" in MODEL:
+        thinking_config = types.ThinkingConfig(thinking_level = types.ThinkingLevel.HIGH)
+    else:
+        thinking_config = types.ThinkingConfig(thinking_budget=0)
+
     response = client.models.generate_content(
         model=MODEL,
         contents=contents,
         config=types.GenerateContentConfig(
             temperature=0.0,
             max_output_tokens=max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=4096),
+            thinking_config=thinking_config,
             response_mime_type="application/json",
-            #response_schema=list[schema_model],
+            response_schema=list[schema_model],
         ),
     )
 
+    um = response.usage_metadata
+    print(f" (doi): in=(um.prompt_token_count) out=(um.candidates_token_count) "f"thinking={getattr(um, 'thoughts_token_count', 0)})")
     raw = response.text
     print(f"  Response: {len(raw):,} characters")
 
