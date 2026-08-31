@@ -25,9 +25,6 @@ domain_rules: |
     Never infer, estimate, or fill a value from typical/textbook knowledge.
     Never calculate a value from other fields unless explicitly marked CALCULATE.
   - Leave a field null if the paper does not provide it.
-  - The ONLY fields you may compute are those marked CALCULATE, and only from
-    other fields you extracted in THIS record: composition_string,
-    grain_boundary_area_to_volume_per_um, and equivalent_true_strain.
 
   RECORD GRANULARITY (one record = one material-CONDITION worth a row):
   - Create a record ONLY for a material-condition that has at least one reported
@@ -63,137 +60,30 @@ domain_rules: |
     do not use a vendor website to look up actual values, and do not invent numbers.
     DESIGNATION-BASED COMPOSITION (exception): if the paper cites a standard alloy
     designation (a UNS number, e.g. C18150, or an EN/DIN number), you MAY record that
-    grade's specified composition FROM THE STANDARD, as RANGES in the *_min / *_max
-    fields, and set composition_source to UNS_spec or EN_spec accordingly. Never collapse
-    a spec range into a single midpoint in the point-value field. A spec-derived composition
-    is nominal, NOT a measurement of this material, so it MUST be tagged via composition_source
-    so it is never mistaken for a measured value. Use the single point-value fields
-    (primary_/secondary_addition_concentration) only for a value the paper itself states,
-    with composition_source = paper_measured or paper_nominal.
+    grade's specified composition FROM THE STANDARD, as an average of the given range.
+    Use the single point-value fields (primary_/secondary_addition_concentration) only for a value the paper itself states.
   - Element slots (primary / secondary / other) take element SYMBOLS only. Dispersoid
     compounds (Al2O3, Y2O3) go in dispersoid_phase; ODS content is often in vol%.
   - primary_addition_unit and secondary_addition_unit are each exactly one of: ppm / wt% / at%.
   - Known element symbols in this project: Cu, Ag, Al, Si, Zn, Sn, Ni, Co, Mn, Mg, Fe,
     Cr, P, Pb, Sb, Bi, Ti, Zr, W, Nb, Ta, Li, Cd, S, Be, O, C, N, Te.
 
-  COMPOSITION STRING (CALCULATE):
-  - Convert all concentrations to atomic fractions, then format as element+fraction pairs
-    with no spaces, normalised to sum 1.0, e.g. "Cu0.991Cr0.007Zr0.002". Pure Cu = "Cu1".
-    Trace dopants at ppm are included, e.g. "Cu0.99994Ti0.00006".
-  - Represents the METALLIC MATRIX only — exclude dispersoid compounds (an ODS Cu-Al2O3
-    is "Cu1", with the Al2O3 recorded in dispersoid_phase), so it does not pollute the
-    Materials Project query.
-  - Use element symbols exactly as in the periodic table. Never leave null if the
-    composition and concentrations are known.
-
-  CALCULATED DESCRIPTORS — DO NOT CALCULATE, leave null:
-  - VEC, delta_H_mix_kJ_mol, delta_S_mix_J_mol_K, delta_atomic_size are computed later by
-    the feature pipeline from the composition fields you extracted. Do not compute them here.
-
   PROCESSING:
-  # --- WHAT deformation: split across three axes so temperature never collides with operation ---
-  - deformation_mode (REQUIRED) — the generic operation, exactly one of:
-    none / rolling / forging / extrusion / drawing / swaging / compression / torsion / other.
-    "none" = no deformation (as-cast, consolidation-only, or heat-treated only).
-    Never put a temperature word here; hot/cold/warm is deformation_temperature_regime.
-
-  - deformation_technique — the specific named process under the mode, else null. One of:
-    rotary_swaging / ECAP / HPT / ARB / dynamic_plastic_deformation /
-    multidirectional_forging / twist_extrusion / other.
-    Null when no named technique applies (plain rolling, forging, drawing, etc.).
-    Use a technique ONLY when the process has a defining geometry or route beyond mode+temperature.
-    Decomposition rule:
-      * cryorolling    -> mode=rolling,    regime=cryogenic, technique=null  (no named technique; regime carries "cryo")
-      * ECAP           -> mode=extrusion,  technique=ECAP   (angular-channel shear ≠ mode+temp)
-      * ARB            -> mode=rolling,     technique=ARB
-      * rotary swaging -> mode=swaging,     technique=rotary_swaging
-
-  - deformation_temperature_regime — exactly one of: cryogenic / cold / warm / hot / not_specified.
-    Defined by recrystallization, NOT absolute value:
-      cryogenic = sub-ambient (e.g. liquid N2), recovery suppressed
-      cold      = below recrystallization, work hardening retained (Cu: ~<0.3 Tm)
-      warm      = intermediate, partial recovery
-      hot       = above recrystallization, dynamic recrystallization (Cu: ~>0.5 Tm, i.e. >~600C)
-    Tm(Cu) ~ 1358 K; thresholds are alloy-specific guides, not hard cutoffs.
-
-  - UMBRELLA-ONLY rule: if the paper names only an umbrella ("hot formed",
-    "thermomechanically processed") with no operation, set deformation_mode=other,
-    deformation_temperature_regime=hot (or as stated), deformation_technique=null,
-    and tag [processing_underspecified] in notes. Do NOT guess a specific operation —
-    do NOT record "forging" for "hot forming", since forging is one operation under
-    that umbrella, not a synonym for it.
-
-  - CONSOLIDATION is not deformation. sintering, spark_plasma_sintering, HIP, and casting
-    belong to processing_category (powder_metallurgy / as_cast), with their parameters in
-    processing_parameters. For an as-consolidated sample, deformation_mode=none.
-
+  
   # --- qualitative state ---
   - material_condition — exactly one of: as_cast / as_fabricated / annealed / recrystallized /
     stress_relieved / cold_worked / cold_drawn / hot_worked / quenched / solution_treated /
     solution_treated_and_aged / aged / peak_aged / over_aged / other.
-    Qualitative state only; the AMOUNT of cold work is equivalent_true_strain. Independent
-    of strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
-    The deformation OPERATION (drawing, rolling) is deformation_mode, never invented into this
-    field: "drawn" -> deformation_mode=drawing and, if the paper says it is cold, cold_drawn or
-    cold_worked here; do NOT record a value like "cold_rolled" that is not in this list.
+    Qualitative state only; Independent of strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
 
-  # --- the route and its parsed values ---
+  # --- the route ---
   - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
     Do not average the temperatures or times — record the actual steps with the stated ranges.
-    The fields below are the parsed values pulled out of it.
-    Example: "solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h".
-
-  - equivalent_true_strain (CALCULATE if not stated directly): total von Mises EQUIVALENT
-    true strain, comparable across all deformation modes. Compute from the COMBINED reduction,
-    NEVER by adding per-step percentages. Engineering reductions do not add; true strains do.
-      * Combined reduction over sequential steps/passes (each r_i a fraction, 50% -> 0.50):
-          R_total = 1 - (1-r1)(1-r2)...(1-rN)      # remaining-thickness fractions MULTIPLY
-      * rolling / drawing / swaging / extrusion (plane strain, constant width):
-          eps = (2/sqrt(3)) * ln(1/(1 - R_total))
-        The 2/sqrt(3) = 1.1547 is the plane-strain von Mises factor (Hosford & Caddell). Equivalently,
-        since true strains add: eps = (2/sqrt(3)) * sum_i ln(1/(1 - r_i)).
-      * multi-pass shortcut applies ONLY when the SAME operation repeats with EQUAL per-pass
-        reduction: eps = (2/sqrt(3)) * n * ln(1/(1 - r_per_pass)). Distinct operations run
-        back-to-back (e.g. rolling then forging) are NOT passes; sum each step's own equivalent strain.
-      * ECAP: about 1.15 per pass for a 90-degree die (Iwahashi equation); total = n * per-pass
-        (already a von Mises equivalent strain — no extra factor).
-      * HPT / other SPD: use the standard process formula and record the geometric inputs
-        (turns, radius, thickness, die angle) in processing_parameters.
-    Plane strain (constant width) is the assumed rolling geometry; note in `notes` if the paper states otherwise.
-    Do NOT keep separate "logarithmic" and "cumulative" strains — this one field replaces both.
-
-  - total_reduction_pct: total reduction as REPORTED, in % (raw input to the strain). If several
-    steps are given, the combined reduction is 1 - prod(1 - r_i), NOT the sum of the per-step percentages.
-  - number_of_passes: number of passes of the SAME operation (e.g. 4 rolling passes), if reported.
-    Distinct operations run back-to-back are separate processing_history steps, not passes.
-    Leave null if the per-operation pass count is not stated (do NOT assume 1).
-  - strain_rate_per_s: deformation strain rate in s^-1, if reported.
-
-  - processing_parameters: process-SPECIFIC parameters not captured above, as key:value pairs
-    with units, keyed to deformation_technique/mode. Free text; null if none.
-    Examples — ECAP: "route=Bc; die_angle=90deg; back_pressure=0MPa";
-    rotary_swaging: "per_pass_reduction=15%; die=4-jaw";
-    spark_plasma_sintering: "pressure=50MPa; dwell=5min; heating_rate=100C/min".
-
-  - deformation_temperature_K is a WORKING temperature and belongs to processing. TEST
-    temperatures (tensile, LCF, etc.) are NOT processing — they live inside each test block.
-
-  HEAT TREATMENTS (a temperature is meaningless without its step and its time — always pair them):
-  - Record standard steps in the named pairs: solution_treatment_temp_K / _time_min,
-    aging_temp_K / _time_min, anneal_recrystallization_temp_K / _time_min.
-  - Non-standard or multi-step schedules (step-ageing, step-quench, duplex anneals) go in
-    heat_treatment_steps as ordered "step:temp:time:cooling" entries.
-  - aging_temp_K / aging_time_min are the most important for precipitation and spinodal
-    alloys — always capture both when an ageing treatment is described.
 
   GRAIN SIZE:
-  - grain_size_L_um = longitudinal/rolling (RD/LD); grain_size_T_um = transverse (TD);
-    grain_size_S_um = short-transverse/normal (ND, thickness). Match the paper's x/y/z to
-    L/T/S from its stated rolling/forging geometry. If the paper states equiaxed, record the single value in L and T, leave S null.
-  - grain_boundary_area_to_volume_per_um (CALCULATE) = 1/L + 1/T + 1/S from the grain sizes.
-    Never null if L/T/S are known.
-  - grain_size_estimated_dimensions — exactly one of: none / partial / x_y_estimated /
-    single_direction_only / reported_as_D10_D50_D90_distribution_not_xyz.
+  - grain_size = Papers usually report the grain size without mentioning any kind of direction. 
+    For singular values given in the body of the article, not in the "Introduction" part, 
+    record the value in grain_size. 
 
   DISLOCATION DENSITY:
   - dislocation_density_m2: units m^-2 (convert cm^-2 x 1e4; 1e7 cm^-2 = 1e11 m^-2). Report the
@@ -202,22 +92,6 @@ domain_rules: |
   - dislocation_structure_description: the observed arrangement (cell walls, tangles, planar
     arrays, veins, stacking faults, twins, etc.).
   - dislocation_density_method — one of: XRD_line_profile / EBSD_KAM / TEM / etch_pit.
-
-  LOADING DIRECTION:
-  - loading_direction_relative_to_grain (inside each test block): the relationship between
-    loading / crack propagation and grain elongation, e.g. "along_L", "along_S", "L-T crack system".
-
-  DIRECTIONS & ORIENTATIONS (no inference). Record any direction or orientation relationship —
-    deformation/rolling direction, loading direction relative to grain, specimen axis vs rolling
-    direction, texture component — ONLY if the paper explicitly states it. NEVER infer a direction
-    from processing geometry or convention (e.g. do not assume rolling is along the normal direction,
-    or that the loading axis is along or across the grain, just because that is typical). If unstated,
-    the field is null and tagged [direction_not_stated].
-  - PLANELESS DIRECTIONALITY: if a characterization plane is not stated but the paper gives partial
-    directionality (e.g. "sectioned perpendicular to the rolling direction" without naming a full
-    L/T/S plane), record that verbatim in the block's examined_section_directionality field. Do NOT
-    force it into examined_section and do NOT infer a plane; examined_section stays null when no
-    explicit plane is given.
 
   TESTS & CHARACTERIZATION:
   # --- existence: a value must be MEASURED, never manufactured ---
@@ -250,27 +124,9 @@ domain_rules: |
     in notes as [author_reported_conversion] with the stated value and basis. A converted value
     never goes into a measured-property field.
 
-  - Allowed calculations are ONLY the fields explicitly marked "CALCULATE" (equivalent_true_strain,
-    composition_string, grain_boundary_area). Those are geometric or compositional descriptors
-    computed from inputs you extracted. This exception NEVER extends to physical measured
-    properties (hardness, strength, modulus, resistivity, fatigue coefficients).
-
   - Values shown ONLY in a figure (plot points, curves) are NOT read or estimated by you, and you
   never compute or guess a datum the paper did not tabulate. Figure-only data is cataloged in
   figure_digitization_manifest and digitized by hand later (see FIGURE DIGITIZATION below).
-
-  FIGURE DIGITIZATION (metadata only, no coordinate reading).
-  - For each data plot, add one figure_digitization_manifest entry with its axes, scale, series, and
-  whether the same data is already tabulated. Do NOT read or estimate coordinate values off a plot;
-  vision-read points are not trusted. Set worth_digitizing=true only when the figure holds data not
-  present in any table or equation.
-  - MULTI-PANEL FIGURES: enumerate EVERY subpanel and inset (a, b, c, and insets) as its own
-  figure_digitization_manifest entry. Do not stop at the first panel or the first inset.
-  - QUALITATIVE SHAPE EXCEPTION (narrow): you MAY describe the visible SHAPE of a distribution
-  histogram (narrow / broad / bimodal / unimodal / uniform / right_skewed / left_skewed) in
-  grain_size_distribution or precipitate_size_distribution, because that reports what the figure
-  shows, not a coordinate. This NEVER extends to reading a numeric value (a mean, SD, or D-value)
-  off a plot; those remain digitization-only.
 
   - Fill a field ONLY from what THIS paper observed, measured, or determined for THIS
     material-condition in its own Methods, Results, or Discussion. Statements in the
@@ -288,26 +144,9 @@ domain_rules: |
   - Optional trace: if the paper only EXPECTS something it never observed, you may record it
     in notes as [expected_not_observed] with the statement, but the field itself stays null.
 
-  # --- umbrella vs specific for methods and specimen prep (same principle as PROCESSING) ---
-  - Record every method as SPECIFICALLY as the paper states it. Do not substitute a specific
-    technique with its umbrella, and do not lose the specific term. Capture the specific named
-    technique; record the umbrella only if that is all the paper gives, and tag [method_underspecified].
-    Examples:
-      * "jet / twin-jet electropolishing" is specific under the electropolishing umbrella ->
-        record jet_electropolishing, NOT plain electropolishing.
-      * BIB and FIB are not generic "ion milling".
-      * SE, BSE, ECCI, EBSD are not generic "SEM".
-    This applies to specimen_preparation_method and to every *_method field alike.
-
-  - precipitate_coherency, and any structural attribute needing a specific probe, is filled
-    ONLY if the paper (a) ran a technique able to determine it — HRTEM lattice imaging or
-    diffraction/strain-contrast TEM for coherency, not plain SEM/EBSD — AND (b) reports that
-    determination for THIS material. An introduction saying coherent precipitates are
-    "expected" is not an observation; coherency stays null. Tag [structure_probe_absent] if
-    the enabling technique was not performed.
 
   - Microstructure quantities stay in the material layer; tag their source with the *_method
-    fields (grain_size_method, texture_method, phase_fraction_method, dislocation_density_method),
+    fields (grain_size_method, texture_method, dislocation_density_method),
     each recording the most specific technique named, per the rule above.
 
   LOW-CYCLE FATIGUE (LCF) — PRIORITY SECTION. Capture ALL fatigue data broadly; when unsure
@@ -338,14 +177,25 @@ domain_rules: |
     If a symbol/name is not listed, STILL extract it: parameter_meaning=other, and put the
     printed symbol and the author's own definition verbatim in symbol_as_printed and notes.
 
-    B. RECOGNIZE EQUATIONS BY FORM; do not omit non-standard frameworks.
-      Δεe/2 = (σf'/E)(2Nf)^b              -> basquin            (elastic regime)
-      Δεp/2 = εf'(2Nf)^c                  -> coffin_manson      (plastic regime)
-      Δε/2  = elastic term + plastic term -> coffin_manson_basquin (total)
-      stress amplitude vs life power law  -> pseudo_wohler
-      plastic/total strain-energy density vs life -> golos_ellyn (energy-based)
-      Δσ/2 = K'(Δεp/2)^n'                 -> cyclic_stress_strain (cyclic Ramberg-Osgood)
-    Any further named model: framework = name-as-printed, and capture its parameters the same way.
+  B. RECOGNIZE EQUATIONS BY FORM; do not omit non-standard frameworks.
+    Strain-life:
+      Δεe/2 = (σf'/E)(2Nf)^b               -> basquin               (elastic regime)
+      Δεp/2 = εf'(2Nf)^c                   -> coffin_manson         (plastic regime)
+      Δε/2  = elastic term + plastic term  -> coffin_manson_basquin (total)
+      Δσ/2  = K'(Δεp/2)^n'                 -> cyclic_stress_strain  (cyclic Ramberg-Osgood)
+      stress amplitude vs life power law   -> pseudo_wohler
+
+    Energy / hysteresis-based (life vs a strain-energy DENSITY per cycle; units MJ/m^3 or kJ/m^3,
+    i.e. MPa x dimensionless strain — do NOT force these into the strain-life slots above):
+      ΔWp = Wf'(2Nf)^α   (equivalently ΔWp·Nf^α = C)         -> morrow_energy   (plastic strain-energy density per cycle)
+      ΔWt = ΔWp + ΔWe⁺ , each term vs life                   -> golos_ellyn     (total strain-energy density: plastic + positive-elastic)
+
+    For a Masing material the hysteresis-loop area itself is
+      ΔWp = [(1-n')/(1+n')]·Δσ·Δεp
+    Recognise this as the plastic hysteresis energy (a definition of ΔWp), NOT a separate framework.
+
+    Any further named model: framework = name-as-printed, and capture its parameters the same way
+    (coefficient, exponent, symbol_as_printed, parameter_meaning, unit) in additional_parameters.
 
   C. FACTOR-OF-TWO PROVENANCE (critical, silent-error source). For every value record BOTH:
   - life_basis  : reversals_2Nf vs cycles_Nf (the life axis differs by a factor of 2).
@@ -369,10 +219,6 @@ domain_rules: |
   E. WHERE TO READ — table/equation beats plot.
   - If a value is TABULATED or stated in an EQUATION, take it from there exactly. Do NOT
     re-derive a tabulated coefficient by digitizing a plot.
-  - Digitize a plot ONLY for datapoints not otherwise reported. Before digitizing, name the
-    exact figure+subfigure in plot_source, read the axis labels, units, and scale (LCF plots
-    are usually log-log), and identify each series (elastic/plastic/total, or a strain range).
-
   - NEVER invent points to complete a curve. Anti-fabrication and observed-in-this-work rules apply.
 
   F. PLOT TYPES (plot_type vocabulary):
@@ -384,6 +230,8 @@ domain_rules: |
     cyclic_plastic_strain_evolution : plastic strain amplitude vs number of cycles
     monotonic_and_cyclic_ssc        : monotonic + cyclic stress-strain curves
     hysteresis_loop                 : stress-strain loop at half-life (cyclic hardening/softening)
+    energy_diagram : strain-energy density (plastic, elastic, or total) vs life —
+                     energy-based frameworks (Golos-Ellyn, Morrow plastic-energy, etc.)
     other
 
   G. STRAIN-COEFFICIENT UNITS (no silent scaling).
