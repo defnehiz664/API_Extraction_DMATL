@@ -11,9 +11,9 @@ It canonicalizes characterization block casing (sem->SEM, tem->TEM, ...) so the
 of double-counted.
 
 Usage:
-  python3 scripts/coverage_report.py                      # all *_extraction.json
-  python3 scripts/coverage_report.py --min 0.5            # only fields filled in >=50% of records
-  python3 scripts/coverage_report.py --out data/coverage.csv
+  python scripts/coverage_report.py                      # all *_extraction.json
+  python scripts/coverage_report.py --min 0.5            # only fields filled in >=50% of records
+  python scripts/coverage_report.py --out data/coverage.csv
 """
 
 import argparse
@@ -21,6 +21,8 @@ import csv
 import glob
 import json
 import math
+import re
+from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -74,11 +76,71 @@ def load_records(outputs_dir):
     return records
 
 
+def _san_col(name):
+    return re.sub(r"[:\\/?*\[\]]", "-", str(name)).strip()[:200] or "run"
+
+
+def append_report(path, run_id, rates, n_records, n_files):
+    """Append this run to a coverage workbook, without regenerating anything.
+
+    Two sheets:
+      summary  — one row per run (headline numbers), newest kept in order.
+      by_field — one column per run_id holding each field's fill-rate, so a
+                 field's coverage across schema versions reads left to right.
+    Re-running the same run_id replaces that run in both sheets."""
+    import pandas as pd
+
+    path = Path(path)
+    run_id = _san_col(run_id)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rates = {str(f): float(r) for f, r in rates.items()}
+
+    summary_row = {
+        "run_id": run_id, "timestamp": ts, "records": n_records, "files": n_files,
+        "distinct_fields": len(rates),
+        "fields_100pct": sum(1 for r in rates.values() if r >= 0.999),
+        "fields_ge_50pct": sum(1 for r in rates.values() if r >= 0.5),
+        "mean_fill_rate": round(sum(rates.values()) / len(rates), 4) if rates else 0.0,
+    }
+
+    exists = path.exists()
+    sheets = pd.ExcelFile(path).sheet_names if exists else []
+
+    if exists and "summary" in sheets:
+        summ = pd.read_excel(path, sheet_name="summary")
+        summ = summ[summ["run_id"] != run_id]                       # replace on re-run
+        summ = pd.concat([summ, pd.DataFrame([summary_row])], ignore_index=True)
+    else:
+        summ = pd.DataFrame([summary_row])
+
+    col = pd.Series(rates, name=run_id)
+    if exists and "by_field" in sheets:
+        wide = pd.read_excel(path, sheet_name="by_field").set_index("field")
+        wide = wide.drop(columns=[run_id], errors="ignore")         # replace on re-run
+        wide = wide.join(col, how="outer")
+    else:
+        wide = col.to_frame()
+    wide.index.name = "field"
+    wide = wide.sort_values(by=run_id, ascending=False)             # order by newest run
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(path, engine="openpyxl") as w:              # full rewrite of both sheets
+        summ.to_excel(w, sheet_name="summary", index=False)
+        wide.reset_index().to_excel(w, sheet_name="by_field", index=False)
+    print(f"\nAppended run '{run_id}' to {path}  "
+          f"(summary + by_field; {len(wide.columns)} run column(s) tracked)")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Field fill-rate across extractions.")
     ap.add_argument("--outputs-dir", default=str(DEFAULT_OUTPUTS_DIR))
     ap.add_argument("--min", type=float, default=0.0, help="only show fields with fill-rate >= this (0-1)")
-    ap.add_argument("--out", default=None, help="optional CSV path for the full table")
+    ap.add_argument("--out", default=None, help="optional CSV path for the full table (one-off snapshot)")
+    ap.add_argument("--report", default="data/coverage_history.xlsx",
+                    help="Excel workbook to append this run to (default data/coverage_history.xlsx)")
+    ap.add_argument("--label", default=None,
+                    help="run/schema-version label for the report column (default: timestamp)")
+    ap.add_argument("--no-report", action="store_true", help="do not append to the report workbook")
     args = ap.parse_args()
 
     records = load_records(args.outputs_dir)
@@ -115,6 +177,11 @@ def main():
             for path, c in rows:
                 w.writerow([path, c, n, round(c / n, 4)])
         print(f"wrote {args.out}")
+
+    if not args.no_report:
+        run_id = args.label or datetime.now().strftime("%Y%m%d_%H%M%S")
+        rates = {path: c / n for path, c in rows}
+        append_report(args.report, run_id, rates, n, len({f for f, _ in records}))
 
 
 if __name__ == "__main__":
