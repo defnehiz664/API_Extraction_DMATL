@@ -6,7 +6,7 @@ hand-checked gold_standard.xlsx, sheet by sheet (Records, LCF, Tensile,
 Hardness). Both files share the pipeline's structure, so this is a
 like-for-like workbook diff.
 
-Cell outcomes (your definitions):
+Cell outcomes:
   TP  gold has a value, prediction matches
   TN  gold cell is 'null' (verified empty) and prediction is empty
   FP  gold cell is 'null' but prediction filled it (fabrication / conversion)
@@ -19,7 +19,10 @@ Row key: paper + material_name, where 'paper' is record_id with its trailing
 fit_regime + fit_range. Gold cell 'null'/'N/A' = verified empty.
 
 Usage:
-  python scripts/score_extraction.py --gold data/gold_standard.xlsx --pred data/features_output.xlsx
+  python3 scripts/coverage_report.py \
+    --outputs-dir data/outputs \
+    --report data/success/coverage_history.xlsx \
+    --label schema_v12
 """
 
 import argparse

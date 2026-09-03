@@ -11,9 +11,9 @@ It canonicalizes characterization block casing (sem->SEM, tem->TEM, ...) so the
 of double-counted.
 
 Usage:
-  python scripts/coverage_report.py                      # all *_extraction.json
-  python scripts/coverage_report.py --min 0.5            # only fields filled in >=50% of records
-  python scripts/coverage_report.py --out data/coverage.csv
+  python3 scripts/coverage_report.py                      # all *_extraction.json
+  python3 scripts/coverage_report.py --min 0.5            # only fields filled in >=50% of records
+  python3 scripts/coverage_report.py --out data/coverage.csv
 """
 
 import argparse
@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUTS_DIR = REPO / "data" / "outputs"
+DEFAULT_OUTPUTS_DIR = REPO / "data" / "success"
 
 # characterization blocks the schema spells uppercase; the model sometimes
 # emits them lowercase with response_schema off. Merge to the canonical name.

@@ -42,8 +42,10 @@ from element_table import build_element_table
 from mendeleev_features import compute_mendeleev_features
 from mp_features import compute_mp_features
 #from usfe_features import compute_usfe_features
-from lcf_export_patch import _write_excel_output
+from block_export import _write_excel_output
 from schema_loader import assign_record_ids
+from identity import merge_records, drop_empty_records, assign_record_ids
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUTS_DIR = REPO_ROOT / "data" / "outputs"
@@ -91,10 +93,31 @@ def load_all_records(outputs_dir: Path) -> list:
     for f in sorted(outputs_dir.glob("*_extraction.json")):
         with open(f, encoding="utf-8") as fh:
             data = json.load(fh)
-        recs = [_canon_record(dict(rec)) for rec in data.get("records", [])]
-        # re-derived here too, so extraction JSONs written before make_record_id
-        # existed do not have to be re-run through the API
-        assign_record_ids(recs, f.stem.removesuffix("_extraction"))
+        raw = data.get("records", [])
+        if isinstance(raw, dict):
+            if "error" in raw or "finish_reason" in raw:
+                print(f"WARNING [{f.name}]: extraction FAILED "
+                      f"(finish_reason={raw.get('finish_reason')}); no records — re-extract this paper.")
+                continue
+            if raw and all(isinstance(v, dict) for v in raw.values()):
+                raw = list(raw.values())
+            else:
+                raw = [raw]
+        if not isinstance(raw, list):
+            print(f"WARNING [{f.name}]: 'records' is {type(raw).__name__}; skipping")
+            continue
+        doi_slug = f.stem.removesuffix("_extraction")
+        recs = [_canon_record(dict(rec)) for rec in raw if isinstance(rec, dict)]
+        recs, n_merged = merge_records(recs, doi_slug)
+        if n_merged:
+            print(f"NOTE [{f.name}]: merged {n_merged} fragmented record(s) into their specimen")
+        #recs, dropped = drop_empty_records(recs)
+        #if dropped:
+            #print(f"NOTE [{f.name}]: dropped {len(dropped)} record(s) with no measured data: "
+                  #f"{[r.get('specimen_id') or r.get('material_condition') or r.get('material_name') for r in dropped]}")
+        collisions = assign_record_ids(recs, doi_slug)
+        if collisions:
+            print(f"WARNING [{f.name}]: {len(collisions)} collision(s) after merge: {collisions}")
         for rec in recs:
             rec["_source_file"] = f.name
             records.append(rec)
@@ -184,8 +207,14 @@ def run_pipeline(outputs_dir: Path, csv_out: Path, excel_out: Path, log_out: Pat
         #     log_lines.append(f"  usfe features FAILED: {e}")
 
         rows.append(row)
-
+    print("record_id in rows:", any("record_id" in r for r in rows))
     df = pd.DataFrame(rows)
+
+    lead = [c for c in ("record_id", "material_name", "source_DOI",
+                        "specimen_id", "material_condition") if c in df.columns]
+    if "record_id" not in df.columns:
+        print("WARNING: record_id missing from every row — assign_record_ids did not run")
+    df = df[lead + [c for c in df.columns if c not in lead]]
     csv_out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv_out, index=False)
     _write_excel_output(df, excel_out)
@@ -209,3 +238,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

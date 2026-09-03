@@ -176,7 +176,7 @@ def assign_record_ids(records: list, doi_slug: str) -> list:
 if __name__ == "__main__":
     import sys
 
-    schema_arg = "schemas/copper/schema.yaml"
+    schema_arg = "/Users/defnehiz/API_Extraction_DMATL-1/schemas/copper/schema.yaml"
     if schema_arg is None:
         print("No schema path provided. Usage: python scripts/schema_loader.py <schema.yaml>")
         sys.exit(1)

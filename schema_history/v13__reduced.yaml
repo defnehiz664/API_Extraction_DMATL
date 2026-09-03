@@ -3,7 +3,9 @@
 # Literature extraction for Cu and Cu-based alloys: composition & strengthening,
 # processing, microstructure, and mechanical / functional test results.
 #
-# THREE TOP-LEVEL SECTIONS:
+# THREE TOP-LEVEL SECTIONS (see why they are separate: fields = 1:1 scalar
+# attributes of the material-condition; tests / characterization = nested
+# sub-objects, present-or-absent as a unit, with their own scoped fields):
 #   fields          - flat material layer, one record per material-CONDITION
 #   tests           - nested; one block per mechanical/functional test
 #   characterization- nested; one block per observation method
@@ -24,24 +26,12 @@ domain_rules: |
     Never calculate a value from other fields unless explicitly marked CALCULATE.
   - Leave a field null if the paper does not provide it.
 
-  RECORD GRANULARITY (identity):
-  - Emit exactly one record per distinct (material composition, processing/heat-treatment
-    condition, test condition) combination reported. Do not split one reported condition
-    into multiple records, and do not merge two distinct conditions into one.
-  - specimen_id = the paper's ACTUAL specimen label, verbatim (full rule on the specimen_id
-    field, including the hardness case). NEVER synthesize a label from the material and the
-    test type (no 'G_hardness_1'). If the paper gives no per-specimen label, leave null.
-  - Record material_condition explicitly (e.g. peak_aged, 10s_hold, as_drawn). The condition
-    is what distinguishes two records of the same material; it is not optional when more than
-    one condition of a material is reported.
-  - Emit a record only for a material, route, or condition that the paper reports at least one
-    measured result for. Do NOT create a record for a processing route or heat treatment that is
-    merely mentioned or compared against but has no reported data (e.g. an alternative route named
-    only to say it was not pursued).
-
-  OUTPUT SPARSITY: Emit only fields for which the paper provides a value. Do NOT
-  include keys whose value would be null, empty, or "not reported" — omit them from
-  the JSON object entirely. Missing fields are filled downstream automatically.
+  RECORD GRANULARITY (one record = one material-CONDITION worth a row):
+  - Create a record ONLY for a material-condition that has at least one reported
+    MEASUREMENT (a test or characterization result), or that the paper explicitly
+    analyses as a distinct endpoint. A transient intermediate processing state with
+    no measured data of its own is NOT its own record; it belongs inside
+    processing_history. Do NOT emit one row per processing step.
 
   UNIT CONVENTIONS (apply everywhere):
   - Temperatures in Kelvin: K = C + 273.15; "RT"/"room temperature" ~= 293 K.
@@ -79,15 +69,21 @@ domain_rules: |
     Cr, P, Pb, Sb, Bi, Ti, Zr, W, Nb, Ta, Li, Cd, S, Be, O, C, N, Te.
 
   PROCESSING:
-  - material_condition — qualitative end state only (enum on the field). Independent of
-    strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
+  
+  # --- qualitative state ---
+  - material_condition — exactly one of: as_cast / as_fabricated / annealed / recrystallized /
+    stress_relieved / cold_worked / cold_drawn / hot_worked / quenched / solution_treated /
+    solution_treated_and_aged / aged / peak_aged / over_aged / other.
+    Qualitative state only; Independent of strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
+
+  # --- the route ---
   - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
     Do not average the temperatures or times — record the actual steps with the stated ranges.
 
   GRAIN SIZE:
-  - grain_size = Papers usually report the grain size without mentioning any kind of direction.
-    For singular values given in the body of the article, not in the "Introduction" part,
-    record the value in grain_size_um.
+  - grain_size = Papers usually report the grain size without mentioning any kind of direction. 
+    For singular values given in the body of the article, not in the "Introduction" part, 
+    record the value in grain_size. 
 
   DISLOCATION DENSITY:
   - dislocation_density_m2: units m^-2 (convert cm^-2 x 1e4; 1e7 cm^-2 = 1e11 m^-2). Report the
@@ -98,6 +94,7 @@ domain_rules: |
   - dislocation_density_method — one of: XRD_line_profile / EBSD_KAM / TEM / etch_pit.
 
   TESTS & CHARACTERIZATION:
+  # --- existence: a value must be MEASURED, never manufactured ---
   - A test or characterization block is null unless that method was actually performed on
     THIS material-condition. The presence of the block is the record that the test was run;
     there is no separate method field. If the paper does not report the test, the block stays null.
@@ -106,8 +103,7 @@ domain_rules: |
     a MEASUREMENT of that property, by that method, for this material-condition. NEVER derive,
     convert, infer, estimate, back-calculate, or otherwise manufacture a value for a property
     that was not measured. An unmeasured property is null. It is never a filled-in guess, and a
-    property being *estimable* from other data is never a reason to fill it. Do not report
-    hardness for a paper that does not measure it. Leave hardness empty rather than inventing a value.
+    property being *estimable* from other data is never a reason to fill it.
 
   - NO CROSS-PROPERTY CONVERSION. A measured property must NEVER be used to populate a different,
     unmeasured property. Explicitly forbidden (non-exhaustive):
@@ -121,8 +117,7 @@ domain_rules: |
   - SOURCE ANCHOR (enforcement). Every non-null measured property MUST have a
     source_figure_or_table pointing to where that specific value was measured in THIS paper.
     If you cannot cite the figure, table, or sentence that reports the measurement, the value
-    is null. No anchor, no value. This anchor must point to Methods/Results/Discussion; if the
-    only support is in the Introduction or abstract, the field is null.
+    is null. No anchor, no value.
 
   - Author-reported conversions. If the AUTHORS themselves present a value they state is
     converted or estimated (not measured), leave the numeric property field null and record it
@@ -130,40 +125,29 @@ domain_rules: |
     never goes into a measured-property field.
 
   - Values shown ONLY in a figure (plot points, curves) are NOT read or estimated by you, and you
-    never compute or guess a datum the paper did not tabulate.
+  never compute or guess a datum the paper did not tabulate. Figure-only data is cataloged in
+  figure_digitization_manifest and digitized by hand later (see FIGURE DIGITIZATION below).
 
   - Fill a field ONLY from what THIS paper observed, measured, or determined for THIS
     material-condition in its own Methods, Results, or Discussion. Statements in the
     Introduction, background, literature review, motivation, or abstract framing are NOT
     observations of this material and must NEVER populate a field, even when stated as fact.
-
   - Expectation / hedge language marks a non-observation — do not extract:
     "is expected to", "should", "is known to", "typically", "generally", "likely",
     "in order to", "aims to", "we anticipate", "reported in the literature".
     These describe intent or prior work, not a result of this study.
-
   - A claim supported only by a citation to another work is background, not this paper's
     data, and does not populate a field. (This differs from data_from_reference, which is
     the separate case where the authors explicitly REUSE another work's measured data.)
-
+  - SOURCE ANCHOR extends here: source_figure_or_table must point to Methods/Results/
+    Discussion. If the only support is in the Introduction or abstract, the field is null.
   - Optional trace: if the paper only EXPECTS something it never observed, you may record it
     in notes as [expected_not_observed] with the statement, but the field itself stays null.
+
 
   - Microstructure quantities stay in the material layer; tag their source with the *_method
     fields (grain_size_method, texture_method, dislocation_density_method),
     each recording the most specific technique named, per the rule above.
-
-  HARDNESS MULTIPLICITY: More than one hardness scale (e.g. HV and HB) for the same
-  specimen are multiple entries in hardness.measurements, never separate records.
-
-  HARDNESS SPECIMEN LABELS: If the mapping of hardness values to specimen labels is
-  given only in a figure (not in the extractable text/tables), do NOT invent labels.
-  Emit ONE hardness record per material+condition and place ALL of that material-
-  condition's hardness readings (any mix of HV and HB, on separate specimens) as
-  entries in its hardness.measurements list. Leave specimen_id null for these
-  material-level hardness records. This applies only to hardness whose specimen labels
-  are unavailable in text; tensile/LCF specimens that ARE labelled in text keep their
-  own specimen_id and their own records.
 
   LOW-CYCLE FATIGUE (LCF) — PRIORITY SECTION. Capture ALL fatigue data broadly; when unsure
   whether something is in scope, extract it and tag it, do not drop it.
@@ -175,15 +159,15 @@ domain_rules: |
   - "Coffin-Manson" == "Manson-Coffin"; name order is not meaningful.
   - Synonyms -> parameter_meaning. DECIDE BY THE DIMENSION OF THE VALUE, not by the symbol or the word "elastic":
       fatigue_strength_coefficient     : elastic-line prefactor expressed as a STRESS (MPa) —
-                                         sigma_f'. Use ONLY when the value carries a stress unit (MPa).
+                                         sigma_f', σ'f, σF'. Use ONLY when the value carries a stress unit (MPa).
       elastic_strain_line_coefficient  : elastic-line prefactor expressed as a STRAIN (dimensionless or %) —
-                                         Ke, A_e. Relates to sigma_f' through Young's modulus (Ke ~= sigma_f'/E).
+                                         Ke, A_e. Relates to sigma_f' through Young's modulus (Ke ≈ sigma_f'/E).
                                          Use this whenever the value is a strain (%/dimensionless), even if the
                                          paper calls it an "elastic coefficient". NEVER put a %/dimensionless
                                          value into the MPa field.
       fatigue_strength_exponent        : elastic-line exponent — b, Ce, "Basquin exponent"
                                          (dimensionless, usually negative). b and Ce are the SAME exponent.
-      fatigue_ductility_coefficient    : plastic-line prefactor, ALWAYS a strain — eps_f', Kp.
+      fatigue_ductility_coefficient    : plastic-line prefactor, ALWAYS a strain — eps_f', ε'f, Kp.
       fatigue_ductility_exponent       : plastic-line exponent — c, Cp (dimensionless, usually negative).
       cyclic_strength_coefficient      : K' (unit MPa).
       cyclic_strain_hardening_exponent : n' (dimensionless).
@@ -195,27 +179,27 @@ domain_rules: |
 
   B. RECOGNIZE EQUATIONS BY FORM; do not omit non-standard frameworks.
     Strain-life:
-      elastic term Dee/2 = (sigma_f'/E)(2Nf)^b   -> basquin               (elastic regime)
-      plastic term Dep/2 = eps_f'(2Nf)^c         -> coffin_manson         (plastic regime)
-      total De/2  = elastic term + plastic term  -> coffin_manson_basquin (total)
-      Dsigma/2  = K'(Dep/2)^n'                    -> cyclic_stress_strain  (cyclic Ramberg-Osgood)
-      stress amplitude vs life power law         -> pseudo_wohler
+      Δεe/2 = (σf'/E)(2Nf)^b               -> basquin               (elastic regime)
+      Δεp/2 = εf'(2Nf)^c                   -> coffin_manson         (plastic regime)
+      Δε/2  = elastic term + plastic term  -> coffin_manson_basquin (total)
+      Δσ/2  = K'(Δεp/2)^n'                 -> cyclic_stress_strain  (cyclic Ramberg-Osgood)
+      stress amplitude vs life power law   -> pseudo_wohler
 
     Energy / hysteresis-based (life vs a strain-energy DENSITY per cycle; units MJ/m^3 or kJ/m^3,
     i.e. MPa x dimensionless strain — do NOT force these into the strain-life slots above):
-      DWp = Wf'(2Nf)^alpha  (equivalently DWp*Nf^alpha = C)  -> morrow_energy   (plastic strain-energy density per cycle)
-      DWt = DWp + DWe+ , each term vs life                   -> golos_ellyn     (total strain-energy density: plastic + positive-elastic)
+      ΔWp = Wf'(2Nf)^α   (equivalently ΔWp·Nf^α = C)         -> morrow_energy   (plastic strain-energy density per cycle)
+      ΔWt = ΔWp + ΔWe⁺ , each term vs life                   -> golos_ellyn     (total strain-energy density: plastic + positive-elastic)
 
     For a Masing material the hysteresis-loop area itself is
-      DWp = [(1-n')/(1+n')]*Dsigma*Dep
-    Recognise this as the plastic hysteresis energy (a definition of DWp), NOT a separate framework.
+      ΔWp = [(1-n')/(1+n')]·Δσ·Δεp
+    Recognise this as the plastic hysteresis energy (a definition of ΔWp), NOT a separate framework.
 
     Any further named model: framework = name-as-printed, and capture its parameters the same way
     (coefficient, exponent, symbol_as_printed, parameter_meaning, unit) in additional_parameters.
 
   C. FACTOR-OF-TWO PROVENANCE (critical, silent-error source). For every value record BOTH:
   - life_basis  : reversals_2Nf vs cycles_Nf (the life axis differs by a factor of 2).
-  - strain_measure / stress_measure : amplitude (De/2) vs full range (De).
+  - strain_measure / stress_measure : amplitude (Δε/2) vs full range (Δε).
     Record exactly as the paper states. NEVER silently convert; conversion is a pipeline job.
 
   D. FIT REGIME / DOMAIN.
@@ -229,8 +213,8 @@ domain_rules: |
     fields null.
   - NEVER pick one segment to populate a flat field. A range-restricted value is not the
     material's single coefficient; presenting it as one is misrepresentation.
-  - Branch alone is not a reason to divert: for a genuine single global fit, the elastic (sigma_f'/b)
-    and plastic (eps_f'/c) results still go in their flat fields.
+  - Branch alone is not a reason to divert: for a genuine single global fit, the elastic (σf'/b)
+    and plastic (εf'/c) results still go in their flat fields.
 
   E. WHERE TO READ — table/equation beats plot.
   - If a value is TABULATED or stated in an EQUATION, take it from there exactly. Do NOT
@@ -241,12 +225,13 @@ domain_rules: |
     strain_life                     : strain amplitude vs reversals/cycles to failure
                                       (Manson-Coffin diagram; elastic/plastic/total series) — PRIMARY
     pseudo_wohler                   : stress amplitude vs life
-    energy_diagram                  : strain-energy density (plastic, elastic, or total) vs life —
-                                      energy-based frameworks (Golos-Ellyn, Morrow plastic-energy, etc.)
+    energy_diagram                  : strain-energy density vs life (Golos-Ellyn)
     cyclic_stress_response          : stress amplitude vs number of cycles, per strain range (hard/soft)
     cyclic_plastic_strain_evolution : plastic strain amplitude vs number of cycles
     monotonic_and_cyclic_ssc        : monotonic + cyclic stress-strain curves
     hysteresis_loop                 : stress-strain loop at half-life (cyclic hardening/softening)
+    energy_diagram : strain-energy density (plastic, elastic, or total) vs life —
+                     energy-based frameworks (Golos-Ellyn, Morrow plastic-energy, etc.)
     other
 
   G. STRAIN-COEFFICIENT UNITS (no silent scaling).
@@ -258,49 +243,37 @@ domain_rules: |
     value is dimensionless, set it to fraction. When the paper is explicit about the unit, honour it;
     when it is not, record the value as printed and set the unit to the form shown.
 
-  H. NO CREEP-FATIGUE (out of scope): exclude LCF tests run with a hold/dwell time
-    (these introduce creep). Extract only continuous-cycling, zero-hold LCF. If a
-    paper reports both a hold and a no-hold variant of the same material/condition,
-    keep ONLY the no-hold variant.
-
 # -----------------------------------------------------------------------------
 # MATERIAL LAYER  (flat scalar attributes; one record per material-condition)
 # -----------------------------------------------------------------------------
 fields:
 
-  # -- IDENTITY --
+  # ── IDENTITY ────────────────────────────────────────────────────────────────
   - name: record_id
     type: str
-    description: "Leave null — assigned by the pipeline"
+    description: "Leave null — assigned manually in Excel"
   - name: material_name
     type: str
     description: "Material name, e.g. 'pure Cu', 'Cu-Zn', 'Cu-3wt%P', 'Cu-0.1wt%Ti'"
-  - name: specimen_id
-    type: str
-    description: >
-      The specimen or sample label the paper itself assigns to this record (e.g. A_01, S-2,
-      "sample 3"). Copy it verbatim; do not invent or renumber. Null if the paper gives no
-      per-specimen label. specimen_id must be the paper's ACTUAL specimen label for that record,
-      in the paper's own scheme (the same G_06, G_21 style used for tensile and LCF). This applies
-      to hardness records too: read the hardness specimen's label from the paper. NEVER synthesize
-      a placeholder such as 'G_hardness_1' from the material letter and the test type. If a hardness
-      value is genuinely not tied to a labeled specimen in the paper (labels only in a figure),
-      leave specimen_id null rather than inventing one.
 
-  # -- COMPOSITION & STRENGTHENING --
+  # ── COMPOSITION & STRENGTHENING ──────────────────────────────────────────────
   - name: strengthening_mechanism
     type: str
-    description: "Primary strengthening mechanism AS STATED — one of: commercially_pure / solid_solution / precipitation / spinodal / dispersion / other. Null if not stated; do NOT infer from composition. If several, choose the dominant one and note others in `notes`."
+    description: "Primary strengthening mechanism AS STATED — one of: commercially_pure /
+      solid_solution / precipitation / spinodal / dispersion / other. Null if not stated;
+      do NOT infer from composition. If several, choose the dominant one and note others in `notes`."
   - name: base_material_purity_pct
     type: float
     unit: wt%
     description: "Cu (base metal) purity in wt%, e.g. 99.97. Typically for commercially pure grades."
   - name: trace_impurities
     type: str
-    description: "Per-element UNINTENTIONAL impurities as element:value pairs with units, e.g. 'O:5ppm, Fe:10ppm, S:3ppm'. Not intentional alloying additions."
+    description: "Per-element UNINTENTIONAL impurities as element:value pairs with units,
+      e.g. 'O:5ppm, Fe:10ppm, S:3ppm'. Not intentional alloying additions."
   - name: primary_addition_element
     type: str
-    description: "Element SYMBOL of the intentional addition at the HIGHEST concentration, e.g. 'Zn', 'Cr', 'Ni', 'Be'. Not a compound (dispersoids go in dispersoid_phase)."
+    description: "Element SYMBOL of the intentional addition at the HIGHEST concentration,
+      e.g. 'Zn', 'Cr', 'Ni', 'Be'. Not a compound (dispersoids go in dispersoid_phase)."
   - name: primary_addition_concentration
     type: float
     description: "Numeric concentration of primary_addition_element (no units here)."
@@ -309,27 +282,51 @@ fields:
     description: "Unit for primary_addition_concentration — exactly one of: ppm / wt% / at%."
   - name: secondary_addition_element
     type: str
-    description: "Element SYMBOL of the intentional addition at the NEXT-highest concentration, if any, e.g. 'Zr' in Cu-Cr-Zr, 'Sn' in Cu-Ni-Sn."
+    description: "Element SYMBOL of the intentional addition at the NEXT-highest concentration,
+      if any, e.g. 'Zr' in Cu-Cr-Zr, 'Sn' in Cu-Ni-Sn."
   - name: secondary_addition_concentration
     type: float
     description: "Numeric concentration of secondary_addition_element (no units here)."
   - name: secondary_addition_unit
     type: str
     description: "Unit for secondary_addition_concentration — exactly one of: ppm / wt% / at%."
+  
+  #- name: dispersoid_phase
+  #  type: str
+  #  description: "Inert dispersed second-phase COMPOUND (ODS), e.g. 'Al2O3', 'Y2O3'.
+  #    Distinct from an aged precipitate. Null unless present."
+  #- name: dispersoid_content
+  #  type: float
+  #  description: "Numeric content of dispersoid_phase (no units here)."
+  #- name: dispersoid_content_unit
+  #  type: str
+  #  description: "Unit for dispersoid_content — exactly one of: vol% / wt% / at%."
+  
 
-  # -- PROCESSING --
+  # ── PROCESSING ───────────────────────────────────────────────────────────────
+
+  # ── Summary & audit (whole-route view; parsed fields below are pulled from these) ──
   - name: material_condition
     type: str
-    description: "Qualitative end state — exactly one of: as_cast / as_fabricated / annealed / recrystallized / stress_relieved / cold_worked / cold_drawn / hot_worked / quenched / solution_treated / solution_treated_and_aged / aged / peak_aged / over_aged / other. State only; the deformation operation (drawing, rolling) is deformation_mode, not this field. Independent of strengthening mechanism (a sample can be peak-aged AND cold-worked)."
+    description: "Qualitative end state — exactly one of: as_cast / as_fabricated / annealed /
+      recrystallized / stress_relieved / cold_worked / cold_drawn / hot_worked / quenched /
+      solution_treated / solution_treated_and_aged / aged / peak_aged / over_aged / other. State only;
+      the amount of cold work is equivalent_true_strain. The deformation operation (drawing, rolling)
+      is deformation_mode, not this field. Independent of strengthening mechanism (a sample can be
+      peak-aged AND cold-worked)."
   - name: processing_history
     type: str
-    description: "Full processing route in reading order, recorded verbatim (lightly normalised). Do not average temperatures or times — keep the stated steps and ranges. E.g. 'cast; solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h'."
+    description: "Full processing route in reading order, recorded verbatim (lightly normalised);
+      the parsed fields below are pulled from it. Do not average temperatures or times — keep the
+      stated steps and ranges. E.g. 'cast; solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h'."
 
-  # -- MICROSTRUCTURE: grain structure --
-  - name: grain_size_um
+
+  # ── MICROSTRUCTURE: grain structure ──────────────────────────────────────────
+  - name: grain_size_L_um
     type: float
     unit: um
-    description: "Grain size in um. Papers usually report it without a direction; record the single stated value here (see the GRAIN SIZE domain rule)."
+    description: "Grain size in the longitudinal/rolling direction (RD/LD), um"
+  
   - name: crystallographic_texture
     type: str
     description: "Texture, e.g. 'strong {110}<001> Goss', 'weak cube'"
@@ -340,7 +337,8 @@ fields:
     type: str
     description: "Source of texture — one of: EBSD / XRD"
 
-  # -- MICROSTRUCTURE: defect & dislocation structure --
+
+  # ── MICROSTRUCTURE: defect & dislocation structure ──────────────────────────
   - name: dislocation_density_m2
     type: float
     unit: "m^-2"
@@ -351,8 +349,9 @@ fields:
   - name: dislocation_structure_description
     type: str
     description: "Observed arrangement, e.g. 'cell walls', 'tangles', 'planar arrays', 'veins'"
+  
 
-  # -- PROVENANCE --
+  # ── PROVENANCE ───────────────────────────────────────────────────────────────
   - name: source_DOI
     type: str
     description: "DOI of the paper being extracted — always fill this"
@@ -361,10 +360,14 @@ fields:
     description: "Figure/table each value came from, e.g. 'Table 2, Fig.3a'"
   - name: notes
     type: str
-    description: "Uncertainties, methodology caveats, unit conversions, derived values. Tags: [methodology] [grain_size_methodology] [derived] [unit_converted] [scope_caveat] [finding]"
+    description: "Uncertainties, methodology caveats, unit conversions, derived values.
+      Tags: [methodology] [grain_size_methodology] [derived] [unit_converted] [scope_caveat] [finding]"
+
+
 
 # -----------------------------------------------------------------------------
 # MECHANICAL / FUNCTIONAL TEST BLOCKS  (nested; null if not run)
+# Each key is a test; its value nests conditions / specimen / results.
 # -----------------------------------------------------------------------------
 tests:
 
@@ -391,16 +394,9 @@ tests:
       - {name: test_temperature_K, type: float, unit: K, description: "Test temperature, K (usually RT)"}
     specimen: []
     results:
-      - name: measurements
-        type: list[dict]
-        description: >
-          One entry per hardness measurement reported for THIS specimen. A specimen may be measured
-          on more than one scale (e.g. Vickers HV and Brinell HB); capture each as its own entry,
-          never drop or overwrite one.
-        item_fields:
-          - {name: hardness_scale, type: str, description: "One of: HV / HB / HRB / other"}
-          - {name: hardness_value, type: float, description: "Hardness number on hardness_scale"}
-          - {name: test_load_kgf, type: float, unit: kgf, description: "Indentation load, kgf (e.g. 0.1 for HV0.1)"}
+      - {name: hardness_scale, type: str, description: "One of: HV / HB / HRB / other"}
+      - {name: hardness_value, type: float, description: "Hardness number on hardness_scale"}
+      - {name: test_load_kgf, type: float, unit: kgf, description: "Indentation load, kgf (e.g. 0.1 for HV0.1)"}
 
   lcf:
     conditions:
@@ -415,7 +411,7 @@ tests:
       - {name: strain_measure, type: str, description: "Strain reported as amplitude (de/2) or full range (de): amplitude / range"}
       - {name: failure_criterion, type: str, description: "How Nf was defined, e.g. '10% peak-load drop', '25% load drop', 'specimen separation'. Nf is meaningless without it."}
       - {name: environment, type: str, description: "Test environment: 'air' / 'vacuum' / 'inert_Ar' / 'corrosive_<medium>'. Fill only if stated; else null."}
-      - {name: strain_rate_per_s, type: float, unit: "s^-1", description: "Total strain rate. If only frequency is reported, leave null and keep frequency_Hz; do not convert."}
+      - {name: strain_rate_per_s, type: float, unit: "s^-1", description: "Total strain rate (ISO 12106's controlled variable). If only frequency is reported, leave null and keep frequency_Hz; do not convert."}
       - {name: sample_size, type: float, description: "Number of specimens behind this curve/condition, if stated (data-quality weight)."}
       - {name: stress_measure, type: str, description: "Stress reported as amplitude (dsigma/2) or full range (dsigma): amplitude / range"}
     specimen:
@@ -423,6 +419,11 @@ tests:
       - {name: specimen_gauge_diameter_mm, type: float, unit: mm, description: "Gauge diameter"}
       - {name: specimen_gauge_length_mm, type: float, unit: mm, description: "Gauge length"}
       - {name: specimen_surface_roughness_Rz_um, type: float, unit: um, description: "Gauge surface roughness Rz (note in notes if reported as Ra). Surface finish is a primary fatigue-initiation factor."}
+
+    # The flat coefficient/exponent fields below are BY DEFINITION the single full-range (total)
+      # Coffin-Manson-Basquin fit on a reversals + amplitude basis (life_basis=reversals_2Nf,
+      # strain_measure=amplitude). Anything else -> additional_parameters, never here.
+
     results:
       - {name: cyclic_response, type: str, description: "'hardening' / 'softening' / 'stable' / 'mixed'"}
       - {name: fatigue_ductility_coefficient, type: float, description: "Coffin-Manson plastic coefficient eps_f'. Record EXACTLY as printed; never rescale a fraction to percent or vice versa."}
@@ -437,18 +438,15 @@ tests:
       - {name: elastic_strain_line_coefficient_unit, type: str, description: "Unit of elastic_strain_line_coefficient as printed — one of: fraction / percent."}
       - {name: elastic_strain_line_exponent, type: float, description: "Strain-based elastic-line exponent Ce (usually negative)."}
       - name: data_points
-        type: list[dict]
-        description: "Strain-life curve: one entry per tested amplitude. Every reported point; null if only constants given."
         item_fields:
-          - {name: total_strain_amplitude_pct, type: float, unit: "%"}
-          - {name: plastic_strain_amplitude_pct, type: float, unit: "%"}
-          - {name: elastic_strain_amplitude_pct, type: float, unit: "%"}
-          - {name: stress_amplitude_MPa, type: float, unit: MPa}
-          - {name: cycles_to_failure_Nf, type: float}
-          - {name: run_out, type: bool, description: "true = specimen did not fail at Nf (run-out / arrowed point); Nf is then a lower bound, not a failure life."}
+        - {name: total_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: plastic_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: elastic_strain_amplitude_pct, type: float, unit: "%"}
+        - {name: stress_amplitude_MPa, type: float, unit: MPa}
+        - {name: cycles_to_failure_Nf, type: float}
+        - {name: run_out, type: bool, description: "true = specimen did not fail at Nf (run-out / arrowed point); Nf is then a lower bound, not a failure life."}
+        description: "Strain-life curve: one entry per tested amplitude. Every reported point; null if only constants given."
       - name: additional_parameters
-        type: list[dict]
-        description: "Any fatigue parameter NOT captured by the flat result fields: regime-restricted or below/above-transition fits, Pseudo-Wohler, Golos-Ellyn/energy, or renamed/non-standard frameworks. Keeps the flat fields as the single canonical fit while omitting nothing."
         item_fields:
           - {name: framework, type: str, description: "Name as printed: coffin_manson / basquin / pseudo_wohler / golos_ellyn / cyclic_stress_strain / other"}
           - {name: parameter_meaning, type: str, description: "Normalized meaning (see domain rules), e.g. fatigue_ductility_coefficient"}
@@ -460,3 +458,5 @@ tests:
           - {name: life_basis, type: str, description: "reversals_2Nf / cycles_Nf / not_stated (overrides conditions only if different)"}
           - {name: strain_measure, type: str, description: "amplitude / range / na (overrides conditions only if different)"}
           - {name: source_figure_or_table, type: str}
+        description: "Any fatigue parameter NOT captured by the flat result fields: regime-restricted or below/above-transition fits, Pseudo-Wohler, Golos-Ellyn/energy, or renamed/non-standard frameworks. Keeps the flat fields as the single canonical fit while omitting nothing."
+

@@ -512,7 +512,7 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
             max_output_tokens=max_output_tokens,
             thinking_config=thinking_config,
             response_mime_type="application/json",
-            response_schema=list[schema_model],
+            #response_schema=list[schema_model],
         ),
     )
 
