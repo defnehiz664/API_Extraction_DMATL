@@ -44,6 +44,7 @@ from score_extraction import (
     _blank, _s, compare, _lowmap, _get_ci, _real_col,
     _rid_key, _lcf_tail, SKIP_COLS,
 )
+from identity import canon_material
 
 # Columns the port never overwrites: the scorer's identity/provenance set PLUS
 # material_condition, which is a MATCHING KEY here (reduced to its last step), not a
@@ -69,19 +70,39 @@ def _last_step(text):
     return parts[-1] if parts else str(text or "")
 
 
-def _fb_key(row, lowmap, is_lcf):
-    """Strict fallback identity: DOI + material + LAST processing step of the
-    condition (+ LCF regime). Reducing to the last step matches an old full route
-    to the new final-state condition; keeping condition (not dropping it) means
-    'solution_treated' and 'aged' still never collide. Used only when UNIQUE on
-    both sides, so it can't mis-place a row."""
+def _doi_token(row, lowmap):
+    """A DOI comparable across the two golds. Prefer a source_DOI column; if absent
+    (the old hand-built gold has none), recover it from the record_id: the id's
+    prefix before '__' is the DOI slug, and the old scheme appended a '-<index>'
+    that we strip. Normalized to bare alphanumerics so slug punctuation differences
+    ('10-1002_adem-...' vs '10.1002/adem...') don't matter."""
     sd = _get_ci(row, lowmap, "source_doi")
+    if not _blank(sd):
+        base = str(sd)
+    else:
+        rid = _get_ci(row, lowmap, "record_id")
+        if _blank(rid):
+            return None
+        base = re.sub(r"-\d+$", "", str(rid).split("__", 1)[0])
+    tok = re.sub(r"[^a-z0-9]", "", base.lower())
+    return tok or None
+
+
+def _fb_key(row, lowmap, is_lcf, use_condition=True):
+    """Strict fallback identity: DOI (real column or recovered from record_id) +
+    canonical material + LAST processing step of the condition (+ LCF regime).
+    `use_condition` is decided per sheet (only when BOTH sheets carry the column) so
+    the key has the same shape on both sides. Used only when UNIQUE on both sides,
+    so it can never mis-place a row."""
+    doi = _doi_token(row, lowmap)
     mat = _get_ci(row, lowmap, "material_name")
-    if _blank(sd) or _blank(mat):
+    if doi is None or _blank(mat):
         return None
-    cond = _get_ci(row, lowmap, "material_condition")
-    cond_key = "" if _blank(cond) else _s(_last_step(cond))
-    return (_s(sd).rstrip("/"), _s(mat), cond_key) + _lcf_tail(row, lowmap, is_lcf)
+    key = [doi, canon_material(mat)]
+    if use_condition:
+        cond = _get_ci(row, lowmap, "material_condition")
+        key.append("" if _blank(cond) else _s(_last_step(cond)))
+    return tuple(key) + _lcf_tail(row, lowmap, is_lcf)
 
 
 def _read_all(path):
@@ -118,6 +139,14 @@ def build_plan(old_book, new_book):
         ndf = new_book[nname]
         is_lcf = oname.lower() == "lcf"
         olow, nlow = _lowmap(odf), _lowmap(ndf)
+
+        # legend / aux sheets carry no row identity — nothing to port, skip quietly
+        if "material_name" not in olow or "material_name" not in nlow:
+            continue
+
+        # condition joins the key only when BOTH sheets have the column, so the key
+        # has equal shape on both sides (the new hardness sheet has no condition).
+        use_cond = "material_condition" in olow and "material_condition" in nlow
         orows = [r for _, r in odf.iterrows()]
 
         rid_old, fb_old = defaultdict(list), defaultdict(list)
@@ -125,20 +154,20 @@ def build_plan(old_book, new_book):
             kr = _rid_key(r, olow, is_lcf)
             if kr is not None:
                 rid_old[kr].append(i)
-            kf = _fb_key(r, olow, is_lcf)
+            kf = _fb_key(r, olow, is_lcf, use_cond)
             if kf is not None:
                 fb_old[kf].append(i)
-        fb_new_count = Counter(k for k in (_fb_key(r, nlow, is_lcf) for _, r in ndf.iterrows()) if k is not None)
+        fb_new_count = Counter(k for k in (_fb_key(r, nlow, is_lcf, use_cond) for _, r in ndf.iterrows()) if k is not None)
         consumed = set()
 
         def _match(nrow):
             kr = _rid_key(nrow, nlow, is_lcf)
             if kr is not None and len(rid_old.get(kr, [])) == 1 and rid_old[kr][0] not in consumed:
                 i = rid_old[kr][0]; consumed.add(i); return i, "record_id"
-            kf = _fb_key(nrow, nlow, is_lcf)
+            kf = _fb_key(nrow, nlow, is_lcf, use_cond)
             if kf is not None and fb_new_count.get(kf, 0) == 1 and len(fb_old.get(kf, [])) == 1 \
                     and fb_old[kf][0] not in consumed:
-                i = fb_old[kf][0]; consumed.add(i); return i, "doi+material+condition"
+                i = fb_old[kf][0]; consumed.add(i); return i, "doi+material" + ("+condition" if use_cond else "")
             return None, None
 
         portable = [c for c in ndf.columns

@@ -80,7 +80,14 @@ domain_rules: |
 
   PROCESSING:
   - material_condition — qualitative end state only (enum on the field). Independent of
-    strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked.
+    strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked. It carries NO
+    number; the temperature of the defining step goes in condition_temperature_C.
+  - condition_temperature_C — the temperature (°C) of the heat-treatment step that defines
+    material_condition (annealing temperature for 'annealed', aging temperature for 'aged',
+    solution temperature for 'solution_treated', etc.). This is what separates otherwise-identical
+    samples in a condition series (three 'annealed' samples at 400/500/600 °C). Record as stated,
+    do NOT convert or average; null if the defining step's temperature is not stated. The full
+    route still goes in processing_history.
   - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
     Do not average the temperatures or times — record the actual steps with the stated ranges.
 
@@ -321,6 +328,10 @@ fields:
   - name: material_condition
     type: str
     description: "Qualitative end state — exactly one of: as_cast / as_fabricated / annealed / recrystallized / stress_relieved / cold_worked / cold_drawn / hot_worked / quenched / solution_treated / solution_treated_and_aged / aged / peak_aged / over_aged / other. State only; the deformation operation (drawing, rolling) is deformation_mode, not this field. Independent of strengthening mechanism (a sample can be peak-aged AND cold-worked)."
+  - name: condition_temperature_C
+    type: float
+    unit: C
+    description: "Temperature in °C of the heat-treatment step that DEFINES material_condition (the annealing temperature for 'annealed', the aging temperature for 'aged', the solution temperature for 'solution_treated', etc.). This is the value that distinguishes otherwise-identical samples in a condition series — e.g. three 'annealed' samples at 400/500/600 °C. Record exactly as stated in °C; do NOT convert or average. Leave null if the paper states no temperature for the defining step. The full route still goes in processing_history."
   - name: processing_history
     type: str
     description: "Full processing route in reading order, recorded verbatim (lightly normalised). Do not average temperatures or times — keep the stated steps and ranges. E.g. 'cast; solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h'."

@@ -64,7 +64,7 @@ def _slug(text, maxlen=40):
 # Strain amplitude is deliberately NOT here — a single LCF test sweeps many strain
 # amplitudes by nature, and those live as rows in lcf.results.data_points (a list),
 # so they UNION on merge instead of forcing a new record or a conflict.
-DEFAULT_IDENTITY_FIELDS = ("material_condition", "lcf::test_temperature_K")
+DEFAULT_IDENTITY_FIELDS = ("material_condition", "condition_temperature_C", "lcf::test_temperature_K")
 
 
 def _deep_find(obj, leaf):
