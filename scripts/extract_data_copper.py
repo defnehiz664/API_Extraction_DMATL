@@ -11,6 +11,13 @@ OUTPUT
 ------
     data/outputs/{doi}_extraction.json   — structured extraction
     data/figures/{doi}/                  — saved EBSD figures (by default)
+
+Robustness
+----------
+Batch mode is crash-proof: work is discovered from the files actually present, and
+every paper runs inside its own guard, so a missing file, a failed download, an API
+error, or unparseable output is recorded and skipped — the batch always finishes and
+reports what failed at the end.
 """
 
 import os
@@ -18,11 +25,13 @@ import sys
 import json
 import base64
 import argparse
-import pymupdf4llm
-import requests
+import traceback
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
+
+import pymupdf4llm
+import requests
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from google import genai
@@ -184,6 +193,18 @@ def extract_xml_tables(xml_path: Path) -> str:
             lines.append("| " + " | ".join(["---"] * ncols) + " |")
         for r in body_rows:
             lines.append("| " + " | ".join(row_cells(r)) + " |")
+
+        # Footnotes / legend carry real content (e.g. a processing route stated only
+        # in a table footnote). They live OUTSIDE thead/tbody, so the row loop misses
+        # them — append them under the table so the model sees them WITH the table.
+        fn_tags = {"legend", "table-footnote", "footnote", "table-fn", "tablefootnote"}
+        seen_fn = set()
+        for e in table.iter():
+            if local(e.tag) in fn_tags:
+                t = text_of(e)
+                if t and t not in seen_fn:
+                    seen_fn.add(t)
+                    lines.append(f"Footnote: {t}")
         blocks.append("\n".join(lines))
 
     return "\n\n".join(blocks)
@@ -253,7 +274,7 @@ def get_xml_content(xml_path: Path) -> tuple[str, list[tuple[str, bytes, str]]]:
             figure_parts.append((ref, base64.standard_b64decode(b64), mime))
             print(f"OK ({len(b64)//1024} KB)")
         except Exception as e:
-            print(f"FAILED: {e}")
+            print(f"FAILED: {e}")     # one figure failing never aborts the paper
 
     return body_text, figure_parts
 
@@ -272,10 +293,13 @@ def render_pdf_pages(pdf_path: Path, dpi: int = PDF_DPI) -> list[tuple[str, byte
 
     print(f"  Rendering {len(doc)} pages at {dpi} DPI...")
     for i, page in enumerate(doc, start=1):
-        pix       = page.get_pixmap(matrix=matrix, alpha=False)
-        png_bytes = pix.tobytes("png")
-        pages.append((f"page_{i}", png_bytes, "image/png"))
-        print(f"  Page {i}/{len(doc)}: {len(png_bytes)//1024} KB")
+        try:
+            pix       = page.get_pixmap(matrix=matrix, alpha=False)
+            png_bytes = pix.tobytes("png")
+            pages.append((f"page_{i}", png_bytes, "image/png"))
+            print(f"  Page {i}/{len(doc)}: {len(png_bytes)//1024} KB")
+        except Exception as e:
+            print(f"  Page {i}/{len(doc)}: render FAILED ({e}); skipping page")
 
     doc.close()
     return pages
@@ -284,7 +308,11 @@ def render_pdf_pages(pdf_path: Path, dpi: int = PDF_DPI) -> list[tuple[str, byte
 def extract_pdf_markdown(pdf_path: Path) -> str:
     """Layout-aware Markdown for the PDF, with tables rendered as Markdown pipe tables.
     If the text layer is thin/absent (a scan), OCR the PDF with ocrmypdf and retry."""
-    md = pymupdf4llm.to_markdown(str(pdf_path))
+    try:
+        md = pymupdf4llm.to_markdown(str(pdf_path))
+    except Exception as e:
+        print(f"  Markdown extraction failed ({e}); continuing with empty text layer")
+        md = ""
     if len(md.strip()) >= 200:
         return md
     # thin/absent text layer -> likely a scan: add a text layer with OCR, then retry
@@ -298,7 +326,11 @@ def extract_pdf_markdown(pdf_path: Path) -> str:
         except Exception as e:
             print(f"  OCR unavailable/failed ({e}); using thin text layer as-is")
             return md
-    md_ocr = pymupdf4llm.to_markdown(str(ocr_path))
+    try:
+        md_ocr = pymupdf4llm.to_markdown(str(ocr_path))
+    except Exception as e:
+        print(f"  OCR markdown failed ({e}); using thin text layer as-is")
+        return md
     print(f"  OCR applied: {len(md.strip())} -> {len(md_ocr.strip())} chars")
     return md_ocr if len(md_ocr.strip()) > len(md.strip()) else md
 
@@ -311,7 +343,11 @@ def extract_docx_text(docx_path: Path) -> str:
     except ImportError:
         print("  python-docx not installed. Run: pip install python-docx")
         return ""
-    doc   = Document(docx_path)
+    try:
+        doc = Document(docx_path)
+    except Exception as e:
+        print(f"  Could not read {docx_path.name} ({e}); skipping")
+        return ""
     parts = []
     for para in doc.paragraphs:
         if para.text.strip():
@@ -363,59 +399,110 @@ def save_selected_figures(
     for label, img_bytes, mime in content_parts:
         if label not in allowed:
             continue
-        figures_dir.mkdir(parents=True, exist_ok=True)
-        ext      = "png" if "png" in mime else "jpg"
-        out_path = figures_dir / f"{doi_slug}_{label}.{ext}"
-        out_path.write_bytes(img_bytes)
-        saved += 1
+        try:
+            figures_dir.mkdir(parents=True, exist_ok=True)
+            ext      = "png" if "png" in mime else "jpg"
+            out_path = figures_dir / f"{doi_slug}_{label}.{ext}"
+            out_path.write_bytes(img_bytes)
+            saved += 1
+        except Exception as e:
+            print(f"  Could not save figure {label} ({e}); skipping")
 
     print(f"  Saved {saved}/{len(content_parts)} EBSD figures to {figures_dir} (allowed IDs: {sorted(allowed)})")
     return figures_dir
 
 
-# ── BATCH MODE ────────────────────────────────────────────────────────────────
+# ── BATCH DISCOVERY ───────────────────────────────────────────────────────────
+
+def _slug_to_doi_map() -> dict:
+    """slug -> true DOI, from the logs (which hold real DOIs). Used to recover the
+    exact DOI for a paper file discovered on disk. Corrupt/absent logs are ignored."""
+    m = {}
+    for name in ("fetch_log.json", "manual_papers.json"):
+        path = PAPERS_DIR / name
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"  [warn] could not read {name} ({e}); ignoring it for DOI lookup")
+            continue
+        entries = data if isinstance(data, list) else []
+        for entry in entries:
+            doi = entry.get("doi") if isinstance(entry, dict) else entry
+            if isinstance(doi, str) and doi:
+                m[doi_to_filename(doi)] = doi
+    return m
+
+
+def _slug_to_doi_fallback(slug: str) -> str:
+    """Best-effort DOI when a paper file is in no log (lossy: '_'->'/', '-'->'.').
+    The file is still found (the slug round-trips), but source_DOI may be imperfect
+    for DOIs containing a literal hyphen — add such papers to manual_papers.json."""
+    return slug.replace("_", "/").replace("-", ".")
+
 
 def get_pending_dois() -> list[str]:
+    """Every paper actually present on disk (.xml or .pdf) that has no extraction
+    output yet. Filesystem-driven, so a PDF never written to fetch_log is still
+    picked up. Logs are used only to map each file to its exact DOI."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    dois = []
+    if not PAPERS_DIR.exists():
+        print(f"  Papers directory not found: {PAPERS_DIR}")
+        return []
+    slug2doi = _slug_to_doi_map()
 
-    fetch_log = PAPERS_DIR / "fetch_log.json"
-    if fetch_log.exists():
-        with open(fetch_log, encoding="utf-8") as f:
-            log = json.load(f)
-        for entry in log:
-            if entry.get("status") in ("full_text", "pdf_downloaded"):
-                dois.append(entry["doi"])
-    else:
-        print("  No fetch_log.json found — run fetch_papers.py first")
+    xml_stems = {p.stem for p in PAPERS_DIR.glob("*.xml")}
+    pdf_stems = {p.stem for p in PAPERS_DIR.glob("*.pdf")}
 
-    manual_log = PAPERS_DIR / "manual_papers.json"
-    if manual_log.exists():
-        with open(manual_log, encoding="utf-8") as f:
-            dois.extend(json.load(f))
-    else:
-        manual_log.write_text('[]\n', encoding="utf-8")
+    # '_am' (accepted-manuscript) and '_ocr' PDFs are auxiliary twins of a primary
+    # file, NOT separate papers. fetch_papers writes an _am.pdf next to the XML of
+    # the same paper; taking both replicates the paper. Skip them, but warn if an
+    # _am.pdf has no primary sibling so a manuscript-only paper isn't lost silently.
+    def _is_aux(stem: str) -> bool:
+        return stem.endswith("_ocr") or stem.endswith("_am")
 
-    seen, unique_dois = set(), []
-    for doi in dois:
-        if doi not in seen:
-            seen.add(doi)
-            unique_dois.append(doi)
+    primary_pdf = {s for s in pdf_stems if not _is_aux(s)}
+    for s in sorted(pdf_stems):
+        if s.endswith("_am"):
+            base = s[:-3]
+            if base not in xml_stems and base not in primary_pdf:
+                print(f"  [warn] {s}.pdf has no primary .xml/.pdf sibling; SKIPPING it. "
+                      f"Rename it to {base}.pdf if you want it extracted.")
+
+    present = sorted(xml_stems | primary_pdf)
+    if not present:
+        print(f"  No .xml or .pdf paper files found in {PAPERS_DIR}")
 
     pending = []
-    for doi in unique_dois:
-        output_file = OUTPUT_DIR / f"{doi_to_filename(doi)}_extraction.json"
-        if output_file.exists():
-            print(f"  [skip] {doi}  (already extracted)")
-        else:
-            pending.append(doi)
-
+    for slug in present:
+        if (OUTPUT_DIR / f"{slug}_extraction.json").exists():
+            print(f"  [skip] {slug}  (already extracted)")
+            continue
+        doi = slug2doi.get(slug)
+        if doi is None:
+            doi = _slug_to_doi_fallback(slug)
+            print(f"  [warn] {slug} is in no log; using best-effort DOI '{doi}'. "
+                  f"Add its real DOI to manual_papers.json for an exact source_DOI.")
+        pending.append(doi)
     return pending
 
 
 # ── MAIN EXTRACTION ───────────────────────────────────────────────────────────
 
-def run_extraction(doi: str, schema_model, schema_config: dict):
+def _usage_str(um) -> str:
+    """Token usage line that never throws, whatever the SDK returns."""
+    if um is None:
+        return "usage unavailable"
+    g = lambda k: getattr(um, k, "?")
+    return (f"in={g('prompt_token_count')} out={g('candidates_token_count')} "
+            f"thinking={getattr(um, 'thoughts_token_count', 0)}")
+
+
+def run_extraction(doi: str, schema_model, schema_config: dict) -> int:
+    """Extract one paper. Returns the number of records written. Raises on a hard
+    failure (missing file, content or API error) so the caller records it and moves
+    on; a merely unparseable model response is saved as an error stub and returns 0."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     doi_slug    = doi_to_filename(doi)
@@ -433,7 +520,11 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         input_format = "xml"
         print(f"Input: XML ({xml_path.name})")
         body_text, content_parts = get_xml_content(xml_path)
-        tables_md = extract_xml_tables(xml_path)
+        try:
+            tables_md = extract_xml_tables(xml_path)
+        except Exception as e:
+            print(f"  Table parse failed ({e}); continuing without structured tables")
+            tables_md = ""
         print(f"  Body text: {len(body_text):,} characters")
         print(f"  Tables parsed: {tables_md.count('###')}")
 
@@ -448,9 +539,8 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
                   "numbers will rely on the page images (OCR-quality).")
 
     else:
-        print(f"\nNo paper file found for DOI: {doi}")
-        print(f"Expected: {xml_path}  or  {pdf_path}")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"No paper file for {doi}: expected {xml_path.name} or {pdf_path.name} in {PAPERS_DIR}")
 
     # ── Step 2: Supplementary docx ─────────────────────────────────────────────
     supp_text  = ""
@@ -466,15 +556,22 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
         print("\nNo supplementary .docx found")
 
     # ── Step 3: Gemini client ─────────────────────────────────────────────────
-    client = genai.Client(
-        vertexai=True,
-        project=GOOGLE_CLOUD_PROJECT,
-        location=GOOGLE_CLOUD_LOCATION,
-    )
+    try:
+        client = genai.Client(
+            vertexai=True,
+            project=GOOGLE_CLOUD_PROJECT,
+            location=GOOGLE_CLOUD_LOCATION,
+        )
+    except Exception as e:
+        raise RuntimeError(f"could not create Gemini client: {e}")
 
     # ── Step 4: Save only explicitly configured EBSD figures ──────────────────
     ebsd_labels = _ebsd_figure_ids_from_env() or {"gr12"}
-    figures_dir = save_selected_figures(doi_slug, content_parts, ebsd_labels)
+    try:
+        figures_dir = save_selected_figures(doi_slug, content_parts, ebsd_labels)
+    except Exception as e:
+        print(f"  Figure saving failed ({e}); continuing")
+        figures_dir = FIGURES_DIR / doi_slug
 
     # ── Step 5: Extract structured data ───────────────────────────────────────
     n_parts = len(content_parts)
@@ -500,48 +597,56 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     if "-pro" in MODEL:
         thinking_config = types.ThinkingConfig(thinking_budget=4096)
     elif "3.5" in MODEL:
-        thinking_config = types.ThinkingConfig(thinking_level = types.ThinkingLevel.HIGH)
+        thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
     else:
         thinking_config = types.ThinkingConfig(thinking_budget=0)
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=max_output_tokens,
-            thinking_config=thinking_config,
-            response_mime_type="application/json",
-            #response_schema=list[schema_model],
-        ),
-    )
+    try:
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=max_output_tokens,
+                thinking_config=thinking_config,
+                response_mime_type="application/json",
+                # response_schema=list[schema_model],
+            ),
+        )
+    except Exception as e:
+        raise RuntimeError(f"Gemini generate_content failed: {e}")
 
-    um = response.usage_metadata
-    print(f" (doi): in=(um.prompt_token_count) out=(um.candidates_token_count) "f"thinking={getattr(um, 'thoughts_token_count', 0)})")
-    raw = response.text
+    um = getattr(response, "usage_metadata", None)
+    print(f"  {doi}: {_usage_str(um)}")
+    raw = response.text or ""
     print(f"  Response: {len(raw):,} characters")
 
     finish_reason = None
-    if response.candidates:
+    if getattr(response, "candidates", None):
         finish_reason = response.candidates[0].finish_reason
-        usage = response.usage_metadata
         print(f"  finish_reason: {finish_reason}  "
-              f"(output_tokens={getattr(usage, 'candidates_token_count', '?')}/{max_output_tokens})")
+              f"(output_tokens={getattr(um, 'candidates_token_count', '?')}/{max_output_tokens})")
 
     # ── Step 7: Parse and save ────────────────────────────────────────────────
     try:
-        data = json.loads(raw)
-        print(f"  Parsed: {len(data)} material records")
-    except json.JSONDecodeError as e:
+        data = json.loads(raw) if raw.strip() else None
+        if data is None:
+            raise ValueError("empty response text")
+        print(f"  Parsed: {len(data)} material records" if isinstance(data, list)
+              else "  Parsed: non-list JSON (kept as-is for review)")
+    except Exception as e:
         print(f"  JSON parse failed: {e}")
         if "MAX_TOKENS" in str(finish_reason):
             print(f"  --> Response was TRUNCATED by max_output_tokens={max_output_tokens}. "
                   f"Raise max_output_tokens or split this paper's extraction into fewer records per call.")
         data = {"error": "parse_failed", "finish_reason": str(finish_reason), "raw": raw}
 
-        # deterministic id: same paper + same material -> same id on every run
+    # deterministic id: same paper + same material -> same id on every run
     if isinstance(data, list):
-        assign_record_ids(data, doi_slug)
+        try:
+            assign_record_ids(data, doi_slug)
+        except Exception as e:
+            print(f"  record_id assignment failed ({e}); ids left as-is")
 
     output = {
         "model":           MODEL,
@@ -563,6 +668,8 @@ def run_extraction(doi: str, schema_model, schema_config: dict):
     if isinstance(data, list):
         print(f"\n── EXTRACTION SUMMARY ({len(data)} records) ──")
         for record in data:
+            if not isinstance(record, dict):
+                continue
             rid     = record.get("record_id") or "?"
             mat     = record.get("material_name") or "?"
             comp    = record.get("composition_type") or "?"
@@ -583,7 +690,7 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("doi", nargs="?", help="DOI of a single paper")
     group.add_argument("--batch", action="store_true",
-                       help="Process all fetched papers not yet extracted")
+                       help="Process all papers present on disk that are not yet extracted")
     parser.add_argument(
         "--schema",
         default=DEFAULT_SCHEMA,
@@ -598,7 +705,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"Schema: {schema_path.name}")
-    schema_model, schema_config = load_schema(schema_path)
+    try:
+        schema_model, schema_config = load_schema(schema_path)
+    except Exception as e:
+        print(f"Failed to load schema {schema_path.name}: {e}")
+        sys.exit(1)
     print(f"  Project: {schema_config.get('project')}  |  "
           f"{len(schema_config.get('fields', []))} fields loaded\n")
 
@@ -608,7 +719,7 @@ if __name__ == "__main__":
         pending = get_pending_dois()
 
         if not pending:
-            print("\nAll fetched papers have already been extracted.")
+            print("\nNo papers pending extraction.")
             sys.exit(0)
 
         print(f"\n{len(pending)} paper(s) to process: {pending}\n")
@@ -620,15 +731,22 @@ if __name__ == "__main__":
             print(f"{'='*60}")
             try:
                 total_records += run_extraction(doi, schema_model, schema_config)
-            except Exception as e:
-                print(f"  ERROR: {e}")
+            except BaseException as e:                    # nothing this paper does aborts the batch
+                print(f"  ERROR ({type(e).__name__}): {e}")
+                traceback.print_exc()
                 failed.append(doi)
 
         print(f"\n{'='*60}")
         print(f"BATCH COMPLETE: {len(pending)-len(failed)}/{len(pending)} succeeded, "
               f"{total_records} total records extracted")
         if failed:
-            print(f"Failed: {failed}")
+            print(f"Failed ({len(failed)}): {failed}")
+            print("These wrote no output, so re-running --batch will retry only them.")
 
     else:
-        run_extraction(args.doi, schema_model, schema_config)
+        try:
+            run_extraction(args.doi, schema_model, schema_config)
+        except BaseException as e:
+            print(f"\nExtraction failed for {args.doi} ({type(e).__name__}): {e}")
+            traceback.print_exc()
+            sys.exit(1)

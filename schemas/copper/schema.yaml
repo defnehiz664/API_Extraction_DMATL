@@ -28,6 +28,21 @@ domain_rules: |
   - Emit exactly one record per distinct (material composition, processing/heat-treatment
     condition, test condition) combination reported. Do not split one reported condition
     into multiple records, and do not merge two distinct conditions into one.
+  - A distinct LCF TEST TEMPERATURE is a distinct record (it is a "test condition"). If one
+    material+condition is fatigue-tested at several temperatures, emit ONE record per test
+    temperature, each carrying its own lcf block with test_temperature_K set to that value. Do
+    NOT fold several test temperatures into a single record, and do NOT leave test_temperature_K
+    null when the paper states or plots the test temperature. Beware: the fatigue TEST temperature
+    (lcf.test_temperature_K) is a different quantity from the PROCESSING temperature
+    (condition_temperature_K, which defines the heat-treatment condition and does NOT split
+    records). One sample solution-treated at 1253 K and fatigue-tested at 300/673/773/900 K is
+    FOUR records, each condition_temperature_K = 1253 and test_temperature_K = 300/673/773/900.
+  - A test block (hardness, tensile, lcf) attaches ONLY to the record of the exact sample/
+    condition it was measured on. Never copy a measurement made on one condition onto records of
+    another (a hardness measured on the aged sample belongs only to aged records, never to the
+    solution-treated ones). A property that was measured on a condition carried no further and
+    shown only in a figure is left null with the figure cited (SOURCE ANCHOR + no-plots rules) —
+    do not fabricate a record for it.
   - specimen_id = the paper's ACTUAL specimen label, verbatim (full rule on the specimen_id
     field, including the hardness case). NEVER synthesize a label from the material and the
     test type (no 'G_hardness_1'). If the paper gives no per-specimen label, leave null.
@@ -81,13 +96,13 @@ domain_rules: |
   PROCESSING:
   - material_condition — qualitative end state only (enum on the field). Independent of
     strengthening_mechanism — a sample can be e.g. peak-aged AND cold-worked. It carries NO
-    number; the temperature of the defining step goes in condition_temperature_C.
-  - condition_temperature_C — the temperature (°C) of the heat-treatment step that defines
-    material_condition (annealing temperature for 'annealed', aging temperature for 'aged',
-    solution temperature for 'solution_treated', etc.). This is what separates otherwise-identical
-    samples in a condition series (three 'annealed' samples at 400/500/600 °C). Record as stated,
-    do NOT convert or average; null if the defining step's temperature is not stated. The full
-    route still goes in processing_history.
+    number; the temperature of the defining step goes in condition_temperature_K.
+  - condition_temperature_K — the PROCESSING temperature (K) of the heat-treatment step that
+    defines material_condition (annealing/aging/solution temperature). Separates otherwise-identical
+    samples in a condition series (three 'annealed' samples at 673/773/873 K). Give Kelvin per the
+    unit convention; do NOT average; null if not stated. This is NOT the fatigue test temperature —
+    that is the lcf block's test_temperature_K, and it (not this field) splits records; see RECORD
+    GRANULARITY.
   - processing_history: the full route in reading order, recorded verbatim (lightly normalised).
     Do not average the temperatures or times — record the actual steps with the stated ranges.
 
@@ -328,10 +343,10 @@ fields:
   - name: material_condition
     type: str
     description: "Qualitative end state — exactly one of: as_cast / as_fabricated / annealed / recrystallized / stress_relieved / cold_worked / cold_drawn / hot_worked / quenched / solution_treated / solution_treated_and_aged / aged / peak_aged / over_aged / other. State only; the deformation operation (drawing, rolling) is deformation_mode, not this field. Independent of strengthening mechanism (a sample can be peak-aged AND cold-worked)."
-  - name: condition_temperature_C
+  - name: condition_temperature_K
     type: float
-    unit: C
-    description: "Temperature in °C of the heat-treatment step that DEFINES material_condition (the annealing temperature for 'annealed', the aging temperature for 'aged', the solution temperature for 'solution_treated', etc.). This is the value that distinguishes otherwise-identical samples in a condition series — e.g. three 'annealed' samples at 400/500/600 °C. Record exactly as stated in °C; do NOT convert or average. Leave null if the paper states no temperature for the defining step. The full route still goes in processing_history."
+    unit: K
+    description: "PROCESSING temperature in KELVIN of the heat-treatment step that DEFINES material_condition (annealing temperature for 'annealed', aging temperature for 'aged', solution temperature for 'solution_treated', etc.). Give Kelvin per the unit convention (K = °C + 273.15); do NOT average. This is the value that distinguishes otherwise-identical samples in a condition series — e.g. three 'annealed' samples at 673/773/873 K. It is NOT the fatigue TEST temperature: the temperature a fatigue test was run at goes in the lcf block's test_temperature_K and splits records (see RECORD GRANULARITY); this field does not. Leave null if no temperature is stated for the defining step. The full route still goes in processing_history."
   - name: processing_history
     type: str
     description: "Full processing route in reading order, recorded verbatim (lightly normalised). Do not average temperatures or times — keep the stated steps and ranges. E.g. 'cast; solution_treated 980C/1h + water quench; cold_rolled 50%, 4 passes; aged 460C/4h'."
