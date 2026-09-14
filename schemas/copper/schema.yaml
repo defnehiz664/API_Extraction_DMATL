@@ -115,8 +115,6 @@ domain_rules: |
   - dislocation_density_m2: units m^-2 (convert cm^-2 x 1e4; 1e7 cm^-2 = 1e11 m^-2). Report the
     paper's value for the as-processed (pre-test) material. Heavily deformed metals are often
     ~1e10 to 1e14 m^-2, but NEVER fill from this range — record only a stated value.
-  - dislocation_structure_description: the observed arrangement (cell walls, tangles, planar
-    arrays, veins, stacking faults, twins, etc.).
   - dislocation_density_method — one of: XRD_line_profile / EBSD_KAM / TEM / etch_pit.
 
   TESTS & CHARACTERIZATION:
@@ -172,7 +170,7 @@ domain_rules: |
     in notes as [expected_not_observed] with the statement, but the field itself stays null.
 
   - Microstructure quantities stay in the material layer; tag their source with the *_method
-    fields (grain_size_method, texture_method, dislocation_density_method),
+    fields (grain_size_method, dislocation_density_method),
     each recording the most specific technique named, per the rule above.
 
   HARDNESS MULTIPLICITY: More than one hardness scale (e.g. HV and HB) for the same
@@ -356,15 +354,9 @@ fields:
     type: float
     unit: um
     description: "Grain size in um. Papers usually report it without a direction; record the single stated value here (see the GRAIN SIZE domain rule)."
-  - name: crystallographic_texture
-    type: str
-    description: "Texture, e.g. 'strong {110}<001> Goss', 'weak cube'"
   - name: grain_size_method
     type: str
     description: "Source of grain size — one of: optical / SEM / EBSD / TEM"
-  - name: texture_method
-    type: str
-    description: "Source of texture — one of: EBSD / XRD"
 
   # -- MICROSTRUCTURE: defect & dislocation structure --
   - name: dislocation_density_m2
@@ -374,9 +366,6 @@ fields:
   - name: dislocation_density_method
     type: str
     description: "Source — one of: XRD_line_profile / EBSD_KAM / TEM / etch_pit"
-  - name: dislocation_structure_description
-    type: str
-    description: "Observed arrangement, e.g. 'cell walls', 'tangles', 'planar arrays', 'veins'"
 
   # -- PROVENANCE --
   - name: source_DOI

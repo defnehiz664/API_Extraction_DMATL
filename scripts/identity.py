@@ -64,7 +64,7 @@ def _slug(text, maxlen=40):
 # Strain amplitude is deliberately NOT here — a single LCF test sweeps many strain
 # amplitudes by nature, and those live as rows in lcf.results.data_points (a list),
 # so they UNION on merge instead of forcing a new record or a conflict.
-DEFAULT_IDENTITY_FIELDS = ("material_condition", "condition_temperature_C", "lcf::test_temperature_K")
+DEFAULT_IDENTITY_FIELDS = ("material_condition", "condition_temperature_K", "lcf::test_temperature_K")
 
 
 def _deep_find(obj, leaf):
@@ -223,12 +223,13 @@ def _dict_has_data(d):
 
 # Real measured content. A record is a phantom (e.g. HT1, a route only mentioned)
 # unless at least one of these is populated. SEM/EBSD/XRD/TEM are gone from the
-# schema so they are NOT listed. Microstructure is kept as FLAT fields, so those
-# are listed here too — otherwise a grain-size-only record (no mechanical test)
-# would be wrongly dropped. Update these two sets if the schema fields change.
+# schema so they are NOT listed. Descriptive microstructure fields (crystallographic
+# _texture, dislocation_structure_description, texture_method) were dropped in v15 as
+# non-quantitative, so they are NOT listed. The remaining QUANTITATIVE flat fields are
+# listed here — otherwise a grain-size-only record (no mechanical test) would be
+# wrongly dropped. Update these two sets if the schema fields change.
 MEASUREMENT_BLOCKS = {"lcf", "tensile", "hardness"}
-MEASUREMENT_FIELDS = {"grain_size_um", "dislocation_density_m2",
-                      "crystallographic_texture", "dislocation_structure_description"}
+MEASUREMENT_FIELDS = {"grain_size_um", "dislocation_density_m2"}
 
 
 def _has_measurement(rec):
