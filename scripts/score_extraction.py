@@ -2,8 +2,8 @@
 score_extraction.py
 ===================
 Confusion-matrix scoring of a pipeline features_output.xlsx against a
-hand-checked gold_standard.xlsx, sheet by sheet (Records, LCF, Tensile,
-Hardness). Both files share the pipeline's structure, so this is a
+hand-checked gold_standard.xlsx, sheet by sheet (records, lcf, tensile,
+hardness). Both files share the pipeline's structure, so this is a
 like-for-like workbook diff.
 
 Cell outcomes:
@@ -14,15 +14,22 @@ Cell outcomes:
   wrong_value / format_unit  gold has a value, prediction filled a DIFFERENT one
        (format_unit = off by a clean x10/x100/x1000: a percent-vs-dimensionless slip)
 
-Row key: paper + material_name, where 'paper' is record_id with its trailing
--index stripped (so re-ordered runs still match). LCF rows also key on
-fit_regime + fit_range. Gold cell 'null'/'N/A' = verified empty.
+Row join: record_id alone, each prediction row consumed once. record_id is
+content-derived by the same code on both sides and unique per row on every
+sheet, so two rows whose ids differ are different records. There is deliberately
+no name-based fallback: within one paper material_name and source_DOI are
+identical across records, so a fallback could only guess by file order and would
+pair rows the id has already declared different. Rows that do not match are
+reported as MISSED (gold side) or SPURIOUS (prediction side) and are not scored
+cell by cell.
+
+Gold cell 'null'/'N/A' = verified empty. Gold cell blank = not checked, skipped.
 
 Usage:
-  python3 scripts/coverage_report.py \
-    --outputs-dir data/outputs \
-    --report data/success/coverage_history.xlsx \
-    --label schema_v12
+  python3 scripts/score_extraction.py \
+    --gold data/gold_standard.xlsx \
+    --pred data/features_output.xlsx \
+    [--label v15] [--report data/success/score_history.xlsx] [--no-report]
 """
 
 import argparse
@@ -39,12 +46,23 @@ RTOL, ATOL = 1e-3, 1e-6
 _BOOL = {"true": True, "false": False, "yes": True, "no": False, "y": True, "n": False, "1": True, "0": False}
 _VERIFIED_EMPTY = {"null", "<null>", "∅", "n/a", "na", "verified_empty", "verified-empty"}
 _SCALE = (10.0, 100.0, 1000.0, 0.1, 0.01, 0.001)
-IDENTITY_COLS = {"record_id", "material_name", "source_doi", "fit_regime", "fit_range"}
+# A cell containing this character holds several values. Chosen over "," because
+# entries legitimately contain commas inside brackets, e.g.
+# "K_PW=958.0 MPa [pseudo_wohler, De_t <= 1%]".
+LIST_SEP = ";"
+IDENTITY_COLS = {"record_id", "material_name", "source_doi"}
 # Provenance/citation columns: dropped from scoring. A mis-cited but numerically
 # correct value is a traceability defect, not a data defect, and free-text
 # locators don't compare cleanly (a value can appear in both a table and a figure).
 PROVENANCE_COLS = {"source_figure_or_table"}
-SKIP_COLS = IDENTITY_COLS | PROVENANCE_COLS
+# Prose, including the model's own self-report. One extra sentence registers as a
+# wrong_value and carries no signal about extraction quality.
+FREETEXT_COLS = {"notes"}
+# Packed test-block columns on the records sheet. Each duplicates a sheet of its
+# own, so auditing both counts every disagreement twice, once as a packed-string
+# mismatch with no detail and once properly, cell by cell, on the block sheet.
+BLOCK_BLOB_COLS = {"tensile", "lcf", "hardness"}
+SKIP_COLS = IDENTITY_COLS | PROVENANCE_COLS | FREETEXT_COLS | BLOCK_BLOB_COLS
 
 
 def _real_col(c) -> bool:
@@ -93,9 +111,8 @@ def _scaling(g, p):
     return any(math.isclose(r, f, rel_tol=0.02) for f in _SCALE)
 
 
-def compare(g, p):
-    if _blank(p):
-        return False, "prediction empty"
+def _eq_scalar(g, p):
+    """Equality for a single value: numbers first, then booleans, then text."""
     gf, pf = _f(g), _f(p)
     if gf is not None and pf is not None:
         if math.isclose(gf, pf, rel_tol=RTOL, abs_tol=ATOL):
@@ -109,12 +126,54 @@ def compare(g, p):
     return False, f"text {str(g)!r} vs {str(p)!r}"
 
 
+def _entries(v):
+    return [e for e in (x.strip() for x in str(v).split(LIST_SEP)) if e]
+
+
+def _eq_list(g, p):
+    """A cell holding several values separated by LIST_SEP. Entries are matched
+    as an unordered collection, so a different ordering is not an error, and the
+    note names which entries are missing or extra instead of dumping both
+    strings. Still ONE cell outcome: multi-value cells must not weigh more in the
+    counts than single-value ones, or the denominator stops meaning 'cells'."""
+    ge, pe = _entries(g), _entries(p)
+    unmatched_g, unmatched_p = [], list(pe)
+    for e in ge:
+        hit = next((f for f in unmatched_p if _eq_scalar(e, f)[0]), None)
+        if hit is None:
+            unmatched_g.append(e)
+        else:
+            unmatched_p.remove(hit)
+    if not unmatched_g and not unmatched_p:
+        return True, ""
+    bits = []
+    if unmatched_g:
+        bits.append(f"{len(unmatched_g)} of {len(ge)} gold entries not found: {unmatched_g}")
+    if unmatched_p:
+        bits.append(f"{len(unmatched_p)} unexpected: {unmatched_p}")
+    return False, "list: " + " | ".join(bits)
+
+
+def compare(g, p):
+    if _blank(p):
+        return False, "prediction empty"
+    if LIST_SEP in str(g) or LIST_SEP in str(p):
+        return _eq_list(g, p)
+    return _eq_scalar(g, p)
+
+
 def _canon_val(v):
-    """A normalized form of a predicted value, for run-to-run flip detection."""
+    """A normalized form of a predicted value, for run-to-run flip detection.
+    Lists are sorted so repeatability agrees with compare() that entry order is
+    not meaningful."""
     f = _f(v)
     if f is not None:
         return round(f, 6)
-    return None if _blank(v) else _s(v)
+    if _blank(v):
+        return None
+    if LIST_SEP in str(v):
+        return tuple(sorted(_s(e) for e in _entries(v)))
+    return _s(v)
 
 
 # ── sheet / row access ────────────────────────────────────────────────────────
@@ -128,34 +187,20 @@ def _get_ci(row, lowmap, name):
     return row.get(col) if col is not None else None
 
 
-def _lcf_tail(row, lowmap, is_lcf):
-    if not is_lcf:
-        return ()
-    return (_s(_get_ci(row, lowmap, "fit_regime")), _s(_get_ci(row, lowmap, "fit_range")))
-
-
-def _rid_key(row, lowmap, is_lcf):
-    """Primary key: record_id (a stable identity you don't edit during gold
-    correction), plus the strain regime for LCF. None if record_id is blank."""
+def _rid_key(row, lowmap):
+    """The join key: record_id. None when blank, which makes the row unjoinable
+    and therefore reported as unmatched rather than guessed at."""
     rid = _get_ci(row, lowmap, "record_id")
-    if _blank(rid):
-        return None
-    return (_s(rid),) + _lcf_tail(row, lowmap, is_lcf)
+    return None if _blank(rid) else (_s(rid),)
 
 
-def _doi_key(row, lowmap, is_lcf):
-    """Fallback: source_DOI + material_name. Stable across runs; source_DOI never
-    changes. None if either is missing."""
-    sd, mat = _get_ci(row, lowmap, "source_doi"), _get_ci(row, lowmap, "material_name")
-    if _blank(sd) or _blank(mat):
-        return None
-    return (_s(sd).rstrip("/"), _s(mat)) + _lcf_tail(row, lowmap, is_lcf)
-
-
-def _mat_key(row, lowmap, is_lcf):
-    """Last-resort fallback: material_name only. Breaks if a material name was
-    corrected in the gold, so it runs only after the two keys above."""
-    return (_s(_get_ci(row, lowmap, "material_name")) or "?",) + _lcf_tail(row, lowmap, is_lcf)
+def _row_label(row, lowmap):
+    """Display key for reporting a row: record_id when present, else the
+    material name, so an unmatched line is identifiable in the output."""
+    rid = _get_ci(row, lowmap, "record_id")
+    if not _blank(rid):
+        return (_s(rid),)
+    return (_s(_get_ci(row, lowmap, "material_name")) or "?",)
 
 
 def _blank_counts():
@@ -184,7 +229,8 @@ def _rates(c):
 # ── scoring ───────────────────────────────────────────────────────────────────
 
 def score(gold_path, pred_path):
-    """Return {'per_sheet', 'overall', 'instances', 'pred_cells', 'reconcile'}."""
+    """Return {'per_sheet', 'overall', 'instances', 'pred_cells', 'reconcile',
+    'row_match'}."""
     gxl, pxl = pd.ExcelFile(gold_path), pd.ExcelFile(pred_path)
     pred_sheets = {n.lower(): n for n in pxl.sheet_names}
 
@@ -200,29 +246,23 @@ def score(gold_path, pred_path):
         gdf = gdf.where(pd.notnull(gdf), None)
         pdf = pdf.where(pd.notnull(pdf), None)
 
-        is_lcf = gname.lower() == "lcf"
         glow, plow = _lowmap(gdf), _lowmap(pdf)
         audit = [c for c in gdf.columns if _real_col(c) and str(c).lower() not in SKIP_COLS]
 
-        # index prediction rows by three keys, best-first: record_id, then
-        # source_DOI+material, then material only. A pred row is consumed on
-        # first match so it is used once.
+        # index prediction rows by record_id; a row is consumed on first match
+        # so it can never be paired with two gold rows.
         pred_list = [r for _, r in pdf.iterrows()]
-        idx_rid, idx_doi, idx_mat = defaultdict(list), defaultdict(list), defaultdict(list)
+        idx_rid = defaultdict(list)
         for i, r in enumerate(pred_list):
-            kr = _rid_key(r, plow, is_lcf)
-            if kr is not None:
-                idx_rid[kr].append(i)
-            kd = _doi_key(r, plow, is_lcf)
-            if kd is not None:
-                idx_doi[kd].append(i)
-            idx_mat[_mat_key(r, plow, is_lcf)].append(i)
+            k = _rid_key(r, plow)
+            if k is not None:
+                idx_rid[k].append(i)
         consumed = set()
 
-        def _take(index, key):
+        def _take(key):
             if key is None:
                 return None
-            for i in index.get(key, []):
+            for i in idx_rid.get(key, []):
                 if i not in consumed:
                     consumed.add(i)
                     return pred_list[i]
@@ -235,12 +275,8 @@ def score(gold_path, pred_path):
 
         missed_rows = []
         for _, grow in gdf.iterrows():
-            k = _rid_key(grow, glow, is_lcf) or _mat_key(grow, glow, is_lcf)
-            prow = _take(idx_rid, _rid_key(grow, glow, is_lcf))
-            if prow is None:
-                prow = _take(idx_doi, _doi_key(grow, glow, is_lcf))
-            if prow is None:
-                prow = _take(idx_mat, _mat_key(grow, glow, is_lcf))
+            k = _row_label(grow, glow)
+            prow = _take(_rid_key(grow, glow))
             if prow is None:
                 missed_rows.append(k)
                 continue
@@ -272,8 +308,9 @@ def score(gold_path, pred_path):
                     c["wrong"] += 1
                     instances.append((gname, k, col, "wrong_value", note))
 
-        spurious_rows = [_mat_key(pred_list[i], plow, is_lcf)
+        spurious_rows = [_row_label(pred_list[i], plow)
                          for i in range(len(pred_list)) if i not in consumed]
+
         rates = _rates(c)
         rates["matched_rows"] = len(consumed)
         rates["missed_rows"] = len(missed_rows)
@@ -313,9 +350,9 @@ def write_report(path, results, gold, pred, label):
     run_id = label or datetime.now().strftime("%Y%m%d_%H%M%S")
     ov = results["overall"]
 
-    # Two lines per run: the "cells" view (precision, denominator = cells the
-    # pipeline filled) and the "full" view (recall, denominator = every gold cell
-    # that has a value). Same run_id on both so they read as a pair.
+    # Three lines per run: precision, recall and accuracy, each with its own
+    # numerator and denominator spelled out. Same run_id on all three so they
+    # read as one run.
     def _row(scope, num, den, metric):
         return {
             "run_id": run_id, "timestamp": ts, "scope": scope,
@@ -342,7 +379,7 @@ def write_report(path, results, gold, pred, label):
     existing = pd.ExcelFile(path).sheet_names if exists else []
     if exists and "summary" in existing:
         prior = pd.read_excel(path, sheet_name="summary")
-        prior = prior[prior["run_id"] != run_id]                    # replace both lines on re-run
+        prior = prior[prior["run_id"] != run_id]                    # replace all lines on re-run
         summ = pd.concat([prior, pd.DataFrame(summary_rows)], ignore_index=True)
     else:
         summ = pd.DataFrame(summary_rows)
@@ -381,10 +418,11 @@ def main():
     print(f"Gold: {args.gold}\nPred: {args.pred}")
     for sheet, r in res["per_sheet"].items():
         _print_block(sheet, r)
-        print(f"  rows: matched {r['matched_rows']}, missed {r['missed_rows']}, spurious {r['spurious_rows']}")
+        print(f"  rows: matched {r['matched_rows']}, missed {r['missed_rows']}, "
+              f"spurious {r['spurious_rows']}")
     _print_block("OVERALL", res["overall"])
 
-    rm = res.get("row_match", {})
+    rm = res["row_match"]
     if any(v["missed"] or v["spurious"] for v in rm.values()):
         print("\n── UNMATCHED ROWS (not scored per-cell) ──")
         for sheet, v in rm.items():

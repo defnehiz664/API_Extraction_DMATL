@@ -34,7 +34,7 @@ BLOCK_RESHAPE = {
         "list_field": "measurements",
         "group_by": [],                              # one row per specimen; measurements do NOT add rows
         "key_field": "hardness_scale",               # HV, HB -> column names
-        "canon_key": True,                           # 'HV0.5','HV5'->'HV'; 'HBW2.5/62.5'->'HB' 
+        "canon_key": True,                           # 'HV0.5','HV5'->'HV'; 'HBW2.5/62.5'->'HB'
         "value_key": "hardness_value",               # the bare-scale column holds the value
         "extra_fields": {"test_load_kgf": "load_kgf"},  # -> HV_load_kgf, HB_load_kgf
     },
@@ -82,6 +82,18 @@ def _find_list_of_dicts(block: dict, field: str):
     return None
 
 
+# Unit spellings that denote the same quantity. Safe to resolve after extraction,
+# unlike a parameter symbol: 'fraction' and 'dimensionless' both mean a pure ratio
+# in every context, whereas 'C' means different things under different frameworks.
+UNIT_ALIASES = {"fraction": "dimensionless"}
+
+
+def _alias_unit(k, v):
+    if str(k).lower().endswith("_unit") and isinstance(v, str):
+        return UNIT_ALIASES.get(v.strip().lower(), v)
+    return v
+
+
 def _flat_scalars(block: dict) -> dict:
     """Scalar fields from the block and its immediate sub-dicts, so a reshaped row
     still carries conditions/specimen scalars. Lists are skipped."""
@@ -90,9 +102,9 @@ def _flat_scalars(block: dict) -> dict:
         if isinstance(v, dict):
             for k2, v2 in v.items():
                 if not isinstance(v2, (list, dict)):
-                    out.setdefault(k2, v2)
+                    out.setdefault(k2, _alias_unit(k2, v2))
         elif not isinstance(v, list):
-            out.setdefault(k, v)
+            out.setdefault(k, _alias_unit(k, v))
     return out
 
 
@@ -251,6 +263,32 @@ LCF_MEANING_MAP = {
     "elastic_strain_line_exponent": "elastic_strain_line_exponent",
 }
 
+# ── framework gating ──────────────────────────────────────────────────────────
+# A bare symbol only means something INSIDE a framework. 'C' is the fatigue
+# ductility exponent under Coffin-Manson and a fit constant under
+# hysteresis_loop_area_fit; 'K_Wp' is a Golos-Ellyn energy coefficient and not an
+# elastic-strain-line term. Routing on meaning or symbol alone therefore drags
+# foreign parameters into the canonical columns, which is how the loop-area C
+# landed in fatigue_ductility_exponent and the Golos-Ellyn higher-range pair landed
+# in elastic_strain_line_*__higher_range.
+#
+# So a parameter reaches the canonical columns ONLY if its framework is listed
+# below. An EMPTY framework counts as canonical, because most papers report
+# Coffin-Manson/Basquin without naming the framework at all.
+CANONICAL_FRAMEWORKS = {
+    "", "coffin_manson", "coffin_manson_basquin", "manson_coffin", "basquin",
+    "morrow", "ramberg_osgood",
+    # inverted-Wa energy law: W_0 and beta are canonical under it (v15 decision)
+    "simplified_hysteresis_energy", "hysteresis_energy_model",
+}
+# Frameworks whose parameters belong in the leftover cell by decision rather than by
+# omission. Listed only so they raise no "symbol not in map" warning on every run.
+# A framework in NEITHER set still goes to the leftover cell, and DOES warn, so a
+# new framework name surfaces instead of being silently dropped or mis-slotted.
+NON_CANONICAL_FRAMEWORKS = {
+    "hysteresis_loop_area_fit", "golos_ellyn", "pseudo_wohler",
+}
+
 
 def _norm_meaning(s) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(s or "").lower()).strip("_")
@@ -329,7 +367,12 @@ def _lcf_reshape(ident: dict, block: dict, warn_sink: set) -> list:
     (symbols normalized via LCF_SYMBOL_MAP; a value recurring on another fit range
     gets a range-tagged column, e.g. fatigue_ductility_exponent__gt1-2pct). Every
     other reported coefficient collapses into one 'additional_parameters' cell.
-    Unrecognized symbols are added to warn_sink for the caller to report."""
+
+    Routing is gated on `framework` (see CANONICAL_FRAMEWORKS): a parameter from a
+    foreign framework never reaches a canonical column, however its meaning or
+    symbol reads. Unrecognized symbols are added to warn_sink for the caller to
+    report, unless their framework is a known non-canonical one, where the leftover
+    cell is the intended destination and a warning would be noise."""
     row = {**ident, **_flat_scalars(block)}
     paper = ident.get("source_DOI") or ident.get("record_id") or "?"
     params = _find_list_of_dicts(block, "additional_parameters") or []
@@ -337,11 +380,14 @@ def _lcf_reshape(ident: dict, block: dict, warn_sink: set) -> list:
     for p in params:
         if not isinstance(p, dict):
             continue
-        col = (LCF_MEANING_MAP.get(_norm_meaning(p.get("parameter_meaning")))
-               or LCF_SYMBOL_MAP.get(_norm_symbol(p.get("symbol_as_printed"))))
+        fw = _norm_meaning(p.get("framework"))
+        col = None
+        if fw in CANONICAL_FRAMEWORKS:
+            col = (LCF_MEANING_MAP.get(_norm_meaning(p.get("parameter_meaning")))
+                   or LCF_SYMBOL_MAP.get(_norm_symbol(p.get("symbol_as_printed"))))
         if not col:
             leftovers.append(p)
-            if p.get("symbol_as_printed"):
+            if p.get("symbol_as_printed") and fw not in NON_CANONICAL_FRAMEWORKS:
                 warn_sink.add((str(p.get("symbol_as_printed")),
                                str(p.get("parameter_meaning") or ""),
                                str(p.get("framework") or ""),
@@ -452,9 +498,11 @@ def _write_excel_output(df: pd.DataFrame, excel_out):
             e["framework"] = e["framework"] or framework
             if paper and paper != "?":
                 e["papers"].add(paper)
-        print(f"\n  [LCF] {len(by_sym)} parameter symbol(s) not in LCF_SYMBOL_MAP "
+        print(f"\n  [LCF] {len(by_sym)} parameter symbol(s) not routed to a canonical column "
               f"(kept in the additional_parameters cell). If any is one of the eight canonical "
-              f"parameters under a new notation, add its symbol to LCF_SYMBOL_MAP in block_export.py:")
+              f"parameters under a new notation, add its symbol to LCF_SYMBOL_MAP in block_export.py; "
+              f"if its framework is simply new, add the framework to CANONICAL_FRAMEWORKS or "
+              f"NON_CANONICAL_FRAMEWORKS so it stops being reported:")
         for sym in sorted(by_sym):
             e = by_sym[sym]
             detail = ", ".join(x for x in (e["meaning"], e["framework"]) if x)
