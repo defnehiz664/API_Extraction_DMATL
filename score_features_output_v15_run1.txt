@@ -1,0 +1,80 @@
+Gold: data/gold_standard.xlsx
+Pred: data/reps_v15/features_output_v15_run1.xlsx
+
+── records ──
+  TP 154   FP 9   FN 10   TN 134
+  precision 94.5%   recall 93.9%   accuracy 94.7%
+  omission 7   wrong_value 3   format_unit 0   fabrication 6
+  rows: matched 16, missed 0, spurious 0
+
+── tensile ──
+  TP 22   FP 1   FN 0   TN 17
+  precision 95.7%   recall 100.0%   accuracy 97.5%
+  omission 0   wrong_value 0   format_unit 0   fabrication 1
+  rows: matched 4, missed 0, spurious 0
+
+── lcf ──
+  TP 254   FP 7   FN 14   TN 303
+  precision 97.3%   recall 94.8%   accuracy 96.7%
+  omission 12   wrong_value 2   format_unit 0   fabrication 5
+  rows: matched 16, missed 0, spurious 0
+
+── hardness ──
+  TP 4   FP 2   FN 2   TN 0
+  precision 66.7%   recall 66.7%   accuracy 66.7%
+  omission 0   wrong_value 2   format_unit 0   fabrication 0
+  rows: matched 2, missed 0, spurious 4
+
+── OVERALL ──
+  TP 434   FP 19   FN 26   TN 454
+  precision 95.8%   recall 94.3%   accuracy 95.9%
+  omission 19   wrong_value 7   format_unit 0   fabrication 12
+
+── UNMATCHED ROWS (not scored per-cell) ──
+  SPURIOUS hardness: ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__300',)  (prediction row with no gold match)
+  SPURIOUS hardness: ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__673',)  (prediction row with no gold match)
+  SPURIOUS hardness: ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__773',)  (prediction row with no gold match)
+  SPURIOUS hardness: ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__900',)  (prediction row with no gold match)
+
+── ERROR INSTANCES ──
+  [omission] records ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: grain_size_transverse_um: prediction empty
+  [fabrication] records ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: grain_size_um: gold null but predicted 30
+  [omission] records ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: strengthening_mechanism: prediction empty
+  [fabrication] records ('10-1016-j-actamat-2014-10-002__cu5atal__annealed__1073-15__293-15',) :: strengthening_mechanism: gold null but predicted 'solid_solution'
+  [fabrication] records ('10-1016-j-actamat-2014-10-002__cu8atal__annealed__1073-15__293-15',) :: strengthening_mechanism: gold null but predicted 'solid_solution'
+  [fabrication] records ('10-1016-j-actamat-2014-10-002__cu16atal__annealed__1073-15__293-15',) :: strengthening_mechanism: gold null but predicted 'solid_solution'
+  [omission] records ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: grain_size_um: prediction empty
+  [omission] records ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: condition_temperature_K: prediction empty
+  [wrong_value] records ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: dislocation_density_m2: list: 3 of 3 gold entries not found: ['19890000000000 at De_t/2 = 0', '19450000000000 at De_t/2 = 0.4', '58050000000000 at De_t/2 = 1.0'] | 1 unexpected: ['19890000000000']
+  [omission] records ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: specimen_id: prediction empty
+  [fabrication] records ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: primary_addition_unit: gold null but predicted 'wt%'
+  [fabrication] records ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: secondary_addition_unit: gold null but predicted 'wt%'
+  [omission] records ('10-1016-j-matchar-2019-109940__cucrzr__cold-drawn__293',) :: specimen_id: prediction empty
+  [wrong_value] records ('10-1016-j-matchar-2019-109940__cucrzr__cold-drawn__293',) :: dislocation_density_m2: list: 4 of 4 gold entries not found: ['25400000000000000 at De_t/2 = 0', '16800000000000000 at De_t/2 = 0.4%', '10700000000000000 at De_t/2 = 0.6%', '224000000000000 at De_t/2 = 0.9%'] | 1 unexpected: ['25400000000000000']
+  [omission] records ('10-1016-j-matchar-2019-109940__cucrzr__annealed__923-15__293',) :: specimen_id: prediction empty
+  [wrong_value] records ('10-1016-j-matchar-2019-109940__cucrzr__annealed__923-15__293',) :: dislocation_density_m2: list: 4 of 4 gold entries not found: ['9280000000000000  at De_t/2 = 0', '12400000000000000 at De_t/2 = 0.4%', '14900000000000000 at De_t/2 = 0.6%', '26400000000000000 at De_t/2 = 0.9%'] | 1 unexpected: ['9280000000000000']
+  [fabrication] tensile ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: test_temperature_K: gold null but predicted 293
+  [omission] lcf ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: fatigue_strength_exponent: prediction empty
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__purecu__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__cu5atal__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__cu8atal__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__cu16atal__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [omission] lcf ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: fatigue_strength_exponent: prediction empty
+  [omission] lcf ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: elastic_strain_line_coefficient_unit: prediction empty
+  [fabrication] lcf ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: elastic_strain_line_coefficient__higher_range: gold null but predicted '0.569 (De_t >= 1.2%)'
+  [fabrication] lcf ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: elastic_strain_line_exponent__higher_range: gold null but predicted '-0.646 (De_t >= 1.2%)'
+  [omission] lcf ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: fatigue_ductility_coefficient_unit: prediction empty
+  [wrong_value] lcf ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',) :: additional_parameters: list: 2 of 6 gold entries not found: ['K_Wp=0.569 GJ m^-3 [golos_ellyn, De_t > 1.2%]', 'C_Wp=-0.646 dimensionless [golos_ellyn, De_t > 1.2%]']
+  [fabrication] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: loading_mode: gold null but predicted 'axial'
+  [fabrication] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: environment: gold null but predicted 'air'
+  [wrong_value] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: specimen_gauge_diameter_mm: numeric 12.0 vs 6.0
+  [omission] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: elastic_strain_line_coefficient: prediction empty
+  [omission] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: elastic_strain_line_coefficient_unit: prediction empty
+  [omission] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: elastic_strain_line_exponent: prediction empty
+  [omission] lcf ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: cyclic_response: prediction empty
+  [fabrication] lcf ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: additional_parameters: gold null but predicted 'transition life=16000 cycles [coffin_manson_basquin]'
+  [wrong_value] hardness ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__673',) :: HV: numeric 105.0 vs 59.0
+  [wrong_value] hardness ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__900',) :: HV: numeric 77.0 vs 59.0
+
+── RECONCILIATION ──
+  records: ["columns absent from prediction: ['grain_size_longitudinal_um', 'grain_size_transverse_um']"]

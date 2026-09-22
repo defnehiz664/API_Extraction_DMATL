@@ -22,6 +22,7 @@ Add an entry to BLOCK_RESHAPE for any future block that carries a list.
 """
 
 import re
+import unicodedata
 
 import pandas as pd
 
@@ -107,6 +108,44 @@ def _flat_scalars(block: dict) -> dict:
             out.setdefault(k, _alias_unit(k, v))
     return out
 
+PROVENANCE_FIELD = "source_figure_or_table"
+
+
+def _text_or_none(v):
+    """Non-empty printable text, or None. Guards against NaN and nested values."""
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    s = str(v).strip()
+    return s if s and s.lower() not in ("nan", "none", "null") else None
+
+
+def _provenance_rows(df: pd.DataFrame) -> list:
+    """Long-format provenance, one row per stated locator.
+
+    The schema states one locator per record today, and one per block where a
+    block carries its own, so `field` reads '(all)'. When the schema gains
+    per-field locators they arrive as extra rows with `field` set to the column
+    name; the sheet's shape does not change."""
+    rec_col = next((c for c in df.columns if str(c).lower() == PROVENANCE_FIELD), None)
+    rows = []
+    for _, r in df.iterrows():
+        rid = r.get("record_id") or r.get("material_name") or "unknown"
+        if rec_col is not None:
+            loc = _text_or_none(r.get(rec_col))
+            if loc:
+                rows.append({"record_id": rid, "sheet": "records",
+                             "field": "(all)", "locator": loc})
+        for c in df.columns:
+            block = r.get(c)
+            if not isinstance(block, dict):
+                continue
+            flat = _flat_scalars(block)
+            key = next((k for k in flat if str(k).lower() == PROVENANCE_FIELD), None)
+            loc = _text_or_none(flat.get(key)) if key else None
+            if loc:
+                rows.append({"record_id": rid, "sheet": _norm_block(c).lower(),
+                             "field": "(all)", "locator": loc})
+    return rows
 
 def _pivot_block(ident: dict, block: dict, cfg: dict, legend: dict) -> list:
     params = _find_list_of_dicts(block, cfg["list_field"])
@@ -286,12 +325,14 @@ CANONICAL_FRAMEWORKS = {
 # A framework in NEITHER set still goes to the leftover cell, and DOES warn, so a
 # new framework name surfaces instead of being silently dropped or mis-slotted.
 NON_CANONICAL_FRAMEWORKS = {
-    "hysteresis_loop_area_fit", "golos_ellyn", "pseudo_wohler",
+    "hysteresis_loop_area_fit", "golos_ellyn", "pseudo_wohler", "empirical_hysteresis_area", "static_toughness"
 }
 
 
 def _norm_meaning(s) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", str(s or "").lower()).strip("_")
+    s = unicodedata.normalize("NFKD", str(s or "").casefold())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "_", s).strip("_")
 
 
 # LCF sheet column order: identity, then all experiment parameters (conditions +
@@ -387,11 +428,14 @@ def _lcf_reshape(ident: dict, block: dict, warn_sink: set) -> list:
                    or LCF_SYMBOL_MAP.get(_norm_symbol(p.get("symbol_as_printed"))))
         if not col:
             leftovers.append(p)
-            if p.get("symbol_as_printed") and fw not in NON_CANONICAL_FRAMEWORKS:
-                warn_sink.add((str(p.get("symbol_as_printed")),
-                               str(p.get("parameter_meaning") or ""),
+            if fw not in NON_CANONICAL_FRAMEWORKS:
+                sym = str(p.get("symbol_as_printed") or "").strip()
+                meaning = str(p.get("parameter_meaning") or "")
+                warn_sink.add((sym or f"<no symbol: {meaning or 'unnamed'}>",
+                               meaning,
                                str(p.get("framework") or ""),
                                str(paper)))
+            continue
             continue
         val = p.get("value")
         cur = row.get(col)
@@ -454,8 +498,15 @@ def _write_excel_output(df: pd.DataFrame, excel_out):
                 g["cols"].append(c)
 
     with pd.ExcelWriter(excel_out, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="records", index=False)
-
+        # Build provenance before the column is removed from the records sheet.
+        prov = _provenance_rows(df) if not df.empty else []
+        rec_df = df.drop(
+            columns=[c for c in df.columns if str(c).lower() == PROVENANCE_FIELD],
+            errors="ignore")
+        rec_df.to_excel(writer, sheet_name="records", index=False)
+        if prov:
+            pd.DataFrame(prov).to_excel(
+                writer, sheet_name=_safe_sheet("provenance", used_sheets), index=False)
         lcf_warnings = set()
         for nb, g in groups.items():
             cfg = _RESHAPE_BY_NORM.get(nb)

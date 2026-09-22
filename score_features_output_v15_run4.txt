@@ -1,0 +1,83 @@
+Gold: data/gold_standard.xlsx
+Pred: data/reps_v15/features_output_v15_run4.xlsx
+
+── records ──
+  TP 138   FP 11   FN 14   TN 130
+  precision 92.6%   recall 90.8%   accuracy 94.0%
+  omission 6   wrong_value 8   format_unit 0   fabrication 3
+  rows: matched 15, missed 1, spurious 1
+
+── tensile ──
+  TP 17   FP 0   FN 0   TN 13
+  precision 100.0%   recall 100.0%   accuracy 100.0%
+  omission 0   wrong_value 0   format_unit 0   fabrication 0
+  rows: matched 3, missed 1, spurious 1
+
+── lcf ──
+  TP 221   FP 18   FN 23   TN 293
+  precision 92.5%   recall 90.6%   accuracy 95.2%
+  omission 8   wrong_value 15   format_unit 0   fabrication 3
+  rows: matched 15, missed 1, spurious 1
+
+── OVERALL ──
+  TP 376   FP 29   FN 37   TN 436
+  precision 92.8%   recall 91.0%   accuracy 95.0%
+  omission 14   wrong_value 23   format_unit 0   fabrication 6
+
+── UNMATCHED ROWS (not scored per-cell) ──
+  MISSED   records: ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',)  (gold row with no prediction match)
+  SPURIOUS records: ('10-1016-j-ijfatigue-2016-07-019__cunisi__aged__293',)  (prediction row with no gold match)
+  MISSED   tensile: ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',)  (gold row with no prediction match)
+  SPURIOUS tensile: ('10-1016-j-ijfatigue-2016-07-019__cunisi__aged__293',)  (prediction row with no gold match)
+  MISSED   lcf: ('10-1016-j-ijfatigue-2016-07-019__cunisi__solution-treated-and-aged__293',)  (gold row with no prediction match)
+  SPURIOUS lcf: ('10-1016-j-ijfatigue-2016-07-019__cunisi__aged__293',)  (prediction row with no gold match)
+
+── ERROR INSTANCES ──
+  [omission] records ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: grain_size_transverse_um: prediction empty
+  [fabrication] records ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: grain_size_um: gold null but predicted 30
+  [omission] records ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: strengthening_mechanism: prediction empty
+  [omission] records ('10-1016-j-actamat-2014-10-002__purecu__annealed__1073-15__293-15',) :: strengthening_mechanism: prediction empty
+  [wrong_value] records ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: processing_history: list: 1 of 4 gold entries not found: ['chain drawn from 30 mm to 12 mm in diameter'] | 1 unexpected: ['chain drawn from 30 mm to 12 mm']
+  [wrong_value] records ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: dislocation_density_m2: list: 3 of 3 gold entries not found: ['19890000000000 at De_t/2 = 0', '19450000000000 at De_t/2 = 0.4', '58050000000000 at De_t/2 = 1.0'] | 1 unexpected: ['19890000000000']
+  [omission] records ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: specimen_id: prediction empty
+  [fabrication] records ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: primary_addition_unit: gold null but predicted 'wt%'
+  [fabrication] records ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: secondary_addition_unit: gold null but predicted 'wt%'
+  [omission] records ('10-1016-j-matchar-2019-109940__cucrzr__cold-drawn__293',) :: specimen_id: prediction empty
+  [wrong_value] records ('10-1016-j-matchar-2019-109940__cucrzr__cold-drawn__293',) :: processing_history: list: 2 of 2 gold entries not found: ['extruded from 30 mm to 12 mm diameter', 'cold drawn'] | 1 unexpected: ['extrusion and drawing processes to 12 mm diameter from 30 mm diameter extrusion rod']
+  [wrong_value] records ('10-1016-j-matchar-2019-109940__cucrzr__cold-drawn__293',) :: dislocation_density_m2: list: 4 of 4 gold entries not found: ['25400000000000000 at De_t/2 = 0', '16800000000000000 at De_t/2 = 0.4%', '10700000000000000 at De_t/2 = 0.6%', '224000000000000 at De_t/2 = 0.9%'] | 1 unexpected: ['25400000000000000']
+  [omission] records ('10-1016-j-matchar-2019-109940__cucrzr__annealed__923-15__293',) :: specimen_id: prediction empty
+  [wrong_value] records ('10-1016-j-matchar-2019-109940__cucrzr__annealed__923-15__293',) :: processing_history: list: 3 of 3 gold entries not found: ['extruded from 30 mm to 12 mm diameter', 'cold drawn', 'annealed at 650 °C for 1 h (60 minutes)'] | 2 unexpected: ['extrusion and drawing processes to 12 mm diameter', 'annealed at 650 °C for 1 h']
+  [wrong_value] records ('10-1016-j-matchar-2019-109940__cucrzr__annealed__923-15__293',) :: dislocation_density_m2: list: 4 of 4 gold entries not found: ['9280000000000000  at De_t/2 = 0', '12400000000000000 at De_t/2 = 0.4%', '14900000000000000 at De_t/2 = 0.6%', '26400000000000000 at De_t/2 = 0.9%'] | 1 unexpected: ['9280000000000000']
+  [wrong_value] records ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__673',) :: processing_history: list: 1 of 2 gold entries not found: ['stress-free thermal ageing at 723 K for 30 min'] | 1 unexpected: ['thermally aged at 723 K for 30 min']
+  [wrong_value] records ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__900',) :: processing_history: list: 1 of 2 gold entries not found: ['stress-free thermal ageing at 723 K for 30 min'] | 1 unexpected: ['thermally aged at 723 K for 30 min']
+  [omission] lcf ('10-1002-adem-201500561__copperbusbar__cold-drawn__293',) :: beta: prediction empty
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__purecu__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [wrong_value] lcf ('10-1016-j-actamat-2014-10-002__purecu__annealed__1073-15__293-15',) :: additional_parameters: list: 2 of 2 gold entries not found: ['k=0.91 dimensionless  [hysteresis_loop_area_fit]', 'C=-1.26 MJ/m^3 [hysteresis_loop_area_fit]'] | 2 unexpected: ['k=0.91 [empirical_hysteresis_area]', 'C=-1.26 10^6 J/m^3 [empirical_hysteresis_area]']
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__cu5atal__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [wrong_value] lcf ('10-1016-j-actamat-2014-10-002__cu5atal__annealed__1073-15__293-15',) :: additional_parameters: list: 2 of 2 gold entries not found: ['k=0.89 dimensionless  [hysteresis_loop_area_fit]', 'C=-1.52 MJ/m^3 [hysteresis_loop_area_fit]'] | 2 unexpected: ['k=0.89 [empirical_hysteresis_area]', 'C=-1.52 10^6 J/m^3 [empirical_hysteresis_area]']
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__cu8atal__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [wrong_value] lcf ('10-1016-j-actamat-2014-10-002__cu8atal__annealed__1073-15__293-15',) :: additional_parameters: list: 2 of 2 gold entries not found: ['k=0.8 dimensionless  [hysteresis_loop_area_fit]', 'C=-0.88 MJ/m^3 [hysteresis_loop_area_fit]'] | 2 unexpected: ['k=0.8 [empirical_hysteresis_area]', 'C=-0.88 10^6 J/m^3 [empirical_hysteresis_area]']
+  [omission] lcf ('10-1016-j-actamat-2014-10-002__cu16atal__annealed__1073-15__293-15',) :: failure_criterion: prediction empty
+  [wrong_value] lcf ('10-1016-j-actamat-2014-10-002__cu16atal__annealed__1073-15__293-15',) :: additional_parameters: list: 2 of 2 gold entries not found: ['k=0.68 dimensionless  [hysteresis_loop_area_fit]', 'C=2.13 MJ/m^3 [hysteresis_loop_area_fit]'] | 2 unexpected: ['k=0.68 [empirical_hysteresis_area]', 'C=2.13 10^6 J/m^3 [empirical_hysteresis_area]']
+  [fabrication] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: loading_mode: gold null but predicted 'axial'
+  [fabrication] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: environment: gold null but predicted 'air'
+  [wrong_value] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: specimen_gauge_diameter_mm: numeric 12.0 vs 6.0
+  [omission] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: elastic_strain_line_coefficient: prediction empty
+  [omission] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: elastic_strain_line_coefficient_unit: prediction empty
+  [omission] lcf ('10-1016-j-ijfatigue-2020-105642__ccz1',) :: elastic_strain_line_exponent: prediction empty
+  [fabrication] lcf ('10-1016-j-jnucmat-2007-03-055__cucrzr__over-aged__873__293',) :: transition_fatigue_life_2Nt: gold null but predicted 32000
+  [wrong_value] lcf ('10-1016-j-matchar-2019-109940__cucrzr__cold-drawn__293',) :: failure_criterion: text 'specimen broke or that the applied load reduced by 25%' vs '25% load drop'
+  [wrong_value] lcf ('10-1016-j-matchar-2019-109940__cucrzr__annealed__923-15__293',) :: failure_criterion: text 'specimen broke or that the applied load reduced by 25%' vs '25% load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__300',) :: failure_criterion: text '20% drop from the saturated/half-life tensile stress' vs '20% peak-load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__673',) :: failure_criterion: text '20% drop from the saturated/half-life tensile stress' vs '20% peak-load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__773',) :: failure_criterion: text '20% drop from the saturated/half-life tensile stress' vs '20% peak-load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__900',) :: failure_criterion: text '20% drop from the saturated/half-life tensile stress' vs '20% peak-load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__solution-treated__1253__900',) :: cyclic_response: text 'mixed' vs 'stable'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__673',) :: failure_criterion: text '20% drop from the saturated/half-life tensile stress' vs '20% peak-load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__900',) :: failure_criterion: text '20% drop from the saturated/half-life tensile stress' vs '20% peak-load drop'
+  [wrong_value] lcf ('10-1016-j-msea-2013-06-034__cucrzrti__aged__723__900',) :: cyclic_response: text 'mixed' vs 'stable'
+
+── RECONCILIATION ──
+  records: ["columns absent from prediction: ['grain_size_longitudinal_um', 'grain_size_transverse_um']"]
+  lcf: ["columns absent from prediction: ['specimen_thickness_mm', 'specimen_width_mm']"]
+  hardness: sheet missing from prediction

@@ -43,8 +43,7 @@ from mendeleev_features import compute_mendeleev_features
 from mp_features import compute_mp_features
 #from usfe_features import compute_usfe_features
 from block_export import _write_excel_output
-from schema_loader import assign_record_ids
-from identity import merge_records, drop_empty_records, assign_record_ids
+from identity import merge_records, assign_record_ids
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -106,20 +105,26 @@ def load_all_records(outputs_dir: Path) -> list:
         if not isinstance(raw, list):
             print(f"WARNING [{f.name}]: 'records' is {type(raw).__name__}; skipping")
             continue
+
+        # How this extraction was produced. Underscore-prefixed so score_extraction's
+        # _real_col never audits them.
+        meta = {
+            "_model":            data.get("model", "unrecorded"),
+            "_model_version":    data.get("model_version", "unrecorded"),
+            "_thinking_setting": data.get("thinking_setting", "unrecorded"),
+        }
+
         doi_slug = f.stem.removesuffix("_extraction")
         recs = [_canon_record(dict(rec)) for rec in raw if isinstance(rec, dict)]
         recs, n_merged = merge_records(recs, doi_slug)
         if n_merged:
             print(f"NOTE [{f.name}]: merged {n_merged} fragmented record(s) into their specimen")
-        #recs, dropped = drop_empty_records(recs)
-        #if dropped:
-            #print(f"NOTE [{f.name}]: dropped {len(dropped)} record(s) with no measured data: "
-                  #f"{[r.get('specimen_id') or r.get('material_condition') or r.get('material_name') for r in dropped]}")
         collisions = assign_record_ids(recs, doi_slug)
         if collisions:
             print(f"WARNING [{f.name}]: {len(collisions)} collision(s) after merge: {collisions}")
         for rec in recs:
             rec["_source_file"] = f.name
+            rec.update(meta)
             records.append(rec)
     return records
 

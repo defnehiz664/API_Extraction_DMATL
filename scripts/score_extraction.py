@@ -331,6 +331,22 @@ def _san_sheet(name):
     s = re.sub(r"[:\\/?*\[\]]", "-", str(name)).strip()
     return (s or "run")[:31]
 
+def _run_provenance(pred_path):
+    """Model and thinking setting as recorded in the prediction workbook.
+
+    Distinct values are joined rather than reduced to the first, so a corpus
+    extracted across sessions with different models reports both."""
+    try:
+        df = pd.read_excel(pred_path, sheet_name="records", dtype=object, keep_default_na=False)
+    except Exception:
+        return {}
+    def joined(col):
+        if col not in df.columns:
+            return "unrecorded"
+        seen = sorted({str(v).strip() for v in df[col] if str(v).strip()})
+        return "|".join(seen) if seen else "unrecorded"
+    return {k: joined(k) for k in ("_model", "_model_version", "_thinking_setting")}
+
 
 def _unique_sheet(name, existing):
     base = _san_sheet(name)
@@ -341,7 +357,6 @@ def _unique_sheet(name, existing):
         i += 1
     return f"{base[:27]}_{i}"
 
-
 def write_report(path, results, gold, pred, label):
     """Append this run to an Excel log: one detail sheet of error instances,
     plus a cumulative 'summary' sheet gaining one row per run."""
@@ -349,14 +364,15 @@ def write_report(path, results, gold, pred, label):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     run_id = label or datetime.now().strftime("%Y%m%d_%H%M%S")
     ov = results["overall"]
+    prov = _run_provenance(pred)
 
-    # Three lines per run: precision, recall and accuracy, each with its own
-    # numerator and denominator spelled out. Same run_id on all three so they
-    # read as one run.
     def _row(scope, num, den, metric):
         return {
             "run_id": run_id, "timestamp": ts, "scope": scope,
             "metric": round(metric, 4), "numerator_TP": num, "denominator": den,
+            "model": prov.get("_model", "unrecorded"),
+            "model_version": prov.get("_model_version", "unrecorded"),
+            "thinking_setting": prov.get("_thinking_setting", "unrecorded"),
             "TP": ov["TP"], "FP": ov["FP"], "FN": ov["FN"], "TN": ov["TN"],
             "omission": ov["omission"], "wrong_value": ov["wrong_value"],
             "format_unit": ov["format_unit"], "fabrication": ov["fabrication"],

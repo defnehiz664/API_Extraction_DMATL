@@ -601,17 +601,17 @@ def run_extraction(doi: str, schema_model, schema_config: dict) -> int:
     else:
         thinking_config = types.ThinkingConfig(thinking_budget=0)
 
+    gen_config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=max_output_tokens,
+        thinking_config=thinking_config,
+        response_mime_type="application/json",
+    )
     try:
         response = client.models.generate_content(
             model=MODEL,
             contents=contents,
-            config=types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=max_output_tokens,
-                thinking_config=thinking_config,
-                response_mime_type="application/json",
-                # response_schema=list[schema_model],
-            ),
+            config=gen_config,
         )
     except Exception as e:
         raise RuntimeError(f"Gemini generate_content failed: {e}")
@@ -648,14 +648,23 @@ def run_extraction(doi: str, schema_model, schema_config: dict) -> int:
         except Exception as e:
             print(f"  record_id assignment failed ({e}); ids left as-is")
 
+        # Read back from the objects that actually ran, so an edit to the branches
+    # above is recorded rather than needing to be remembered.
+    _tb = getattr(thinking_config, "thinking_budget", None)
+    _tl = getattr(thinking_config, "thinking_level", None)
+
     output = {
-        "model":           MODEL,
-        "doi":             doi,
-        "input_format":    input_format,
-        "n_content_parts": n_parts,
-        "supp_chars":      len(supp_text),
-        "figures_dir":     str(figures_dir),
-        "records":         data,
+        "model":            MODEL,
+        "model_version":    getattr(response, "model_version", None),
+        "thinking_setting": f"budget={_tb}" if _tb is not None else f"level={getattr(_tl, 'name', _tl)}",
+        "response_schema":  gen_config.response_schema is not None,
+        "temperature":      gen_config.temperature,
+        "doi":              doi,
+        "input_format":     input_format,
+        "n_content_parts":  n_parts,
+        "supp_chars":       len(supp_text),
+        "figures_dir":      str(figures_dir),
+        "records":          data,
     }
 
     with open(output_file, "w", encoding="utf-8") as f:
